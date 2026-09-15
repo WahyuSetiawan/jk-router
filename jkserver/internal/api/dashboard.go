@@ -6,12 +6,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
-	
 
 	"jkrouter/jkserver/internal/db"
 )
+
+// AccountShort is a lightweight account representation for JSON responses.
+type AccountShort struct {
+	ID        int64  `json:"id"`
+	Label     string `json:"label"`
+	AuthType  string `json:"auth_type"`
+	State     string `json:"state"`
+	Priority  int    `json:"priority"`
+	CreatedAt int64  `json:"created_at"`
+}
 
 // DashboardRouter mounts all /api/dashboard/* endpoints.
 func DashboardRouter(d *db.DB) chi.Router {
@@ -45,142 +55,267 @@ func DashboardRouter(d *db.DB) chi.Router {
 	return r
 }
 
-// --- Providers ---
+// --- Providers (wraps accounts grouped by provider) ---
 
+// ListProvidersHandler returns providers with their accounts.
 func ListProvidersHandler(d *db.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		_ = r
-		rows, err := d.Query(`SELECT id, label, auth_type, base_url, created_at, updated_at FROM providers ORDER BY label`)
+	return func(w http.ResponseWriter, _ *http.Request) {
+		// Fetch all providers
+		provRows, err := d.Query(`SELECT id, name FROM providers ORDER BY name`)
 		if err != nil {
-			http.Error(w, `{"error":"query"}`, 500)
+			http.Error(w, `{"error":"query providers"}`, 500)
 			return
 		}
-		defer rows.Close()
-		type P struct {
-			ID        int64  `json:"id"`
-			Label     string `json:"label"`
-			AuthType  string `json:"auth_type"`
-			BaseURL   string `json:"base_url"`
-			CreatedAt int64  `json:"created_at"`
-			UpdatedAt int64  `json:"updated_at"`
+		type Provider struct {
+			ID       string         `json:"id"`
+			Name     string         `json:"name"`
+			Accounts []AccountShort `json:"accounts"`
 		}
-		var out []P
-		for rows.Next() {
-			var p P
-			rows.Scan(&p.ID, &p.Label, &p.AuthType, &p.BaseURL, &p.CreatedAt, &p.UpdatedAt)
-			out = append(out, p)
+		providers := make(map[string]*Provider)
+		var provList []string
+		for provRows.Next() {
+			var id, name string
+			if err := provRows.Scan(&id, &name); err != nil {
+				provRows.Close()
+				http.Error(w, `{"error":"scan provider"}`, 500)
+				return
+			}
+			p := &Provider{ID: id, Name: name}
+			providers[id] = p
+			provList = append(provList, id)
+		}
+		provRows.Close()
+
+		// Fetch all accounts
+		acctRows, err := d.Query(`
+			SELECT a.id, a.provider_id, a.label, a.auth_type, a.state,
+			       a.priority, a.created_at, p.name AS provider_name
+			FROM accounts a
+			LEFT JOIN providers p ON a.provider_id = p.id
+			ORDER BY p.name, a.label
+		`)
+		if err != nil {
+			http.Error(w, `{"error":"query accounts"}`, 500)
+			return
+		}
+		defer acctRows.Close()
+
+		for acctRows.Next() {
+			var a AccountShort
+			var providerID, providerName string
+			if err := acctRows.Scan(&a.ID, &providerID, &a.Label, &a.AuthType, &a.State, &a.Priority, &a.CreatedAt, &providerName); err != nil {
+				http.Error(w, `{"error":"scan account"}`, 500)
+				return
+			}
+			if p, ok := providers[providerID]; ok {
+				p.Accounts = append(p.Accounts, a)
+			}
+		}
+
+		out := make([]Provider, 0, len(provList))
+		for _, id := range provList {
+			out = append(out, *providers[id])
 		}
 		if out == nil {
-			out = []P{}
+			out = []Provider{}
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"providers": out})
 	}
 }
 
+// CreateProviderHandler creates a provider and an initial account.
 func CreateProviderHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
+			Name     string `json:"name"`
 			Label    string `json:"label"`
-			AuthType string `json:"auth_type"` // "api_key" | "oauth"
+			AuthType string `json:"auth_type"`
 			BaseURL  string `json:"base_url"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"error":"bad request"}`, 400)
 			return
 		}
-		if req.Label == "" || req.AuthType == "" || req.BaseURL == "" {
-			http.Error(w, `{"error":"label, auth_type, base_url required"}`, 400)
+		if req.Name == "" {
+			http.Error(w, `{"error":"name required"}`, 400)
 			return
 		}
-		var id int64
+		label := req.Label
+		if label == "" {
+			label = req.Name
+		}
+		authType := req.AuthType
+		if authType == "" {
+			authType = "api_key"
+		}
+
+		var providerID string
+		var accountID int64
 		d.EnqueueWriteSync(func(q *db.Queue) {
-			res, err := q.DB().Exec(
-				`INSERT INTO providers (label, auth_type, base_url, disabled) VALUES (?, ?, ?, 0)`,
-				req.Label, req.AuthType, req.BaseURL,
+			// Create provider
+			_, err := q.DB().Exec(
+				`INSERT INTO providers (id, name) VALUES (?, ?)`,
+				req.Name, req.Name,
 			)
 			if err != nil {
-				http.Error(w, `{"error":"insert failed"}`, 500)
+				http.Error(w, fmt.Sprintf(`{"error":"create provider: %v"}`, err), 500)
 				return
 			}
-			id, _ = res.LastInsertId()
+			providerID = req.Name
+
+			// Create account
+			var encrypted sql.NullString
+			if req.BaseURL != "" {
+				enc, err2 := db.EncryptSecret(req.BaseURL)
+				if err2 != nil {
+					http.Error(w, `{"error":"encrypt"}`, 500)
+					return
+				}
+				encrypted = sql.NullString{String: enc, Valid: true}
+			}
+			res2, err := q.DB().Exec(
+				`INSERT INTO accounts (provider_id, label, auth_type, encrypted_key, state) VALUES (?, ?, ?, ?, 'active')`,
+				providerID, label, authType, encrypted,
+			)
+			if err != nil {
+				http.Error(w, fmt.Sprintf(`{"error":"create account: %v"}`, err), 500)
+				return
+			}
+			accountID, _ = res2.LastInsertId()
 		})
+
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"id":%d,"label":"%s"}`, id, req.Label)
+		fmt.Fprintf(w, `{"id":"%s","account_id":%d,"name":"%s"}`, providerID, accountID, req.Name)
 	}
 }
 
+// GetProviderHandler returns a provider with its accounts.
 func GetProviderHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
+
 		var row struct {
-			ID        int64  `json:"id"`
-			Label     string `json:"label"`
-			AuthType  string `json:"auth_type"`
-			BaseURL   string `json:"base_url"`
-			Disabled  bool   `json:"disabled"`
-			CreatedAt int64  `json:"created_at"`
+			ID       string         `json:"id"`
+			Name     string         `json:"name"`
+			Accounts []AccountShort `json:"accounts"`
 		}
-		err := d.QueryRow(`SELECT id, label, auth_type, base_url, disabled, created_at FROM providers WHERE id=?`, id).Scan(
-			&row.ID, &row.Label, &row.AuthType, &row.BaseURL, &row.Disabled, &row.CreatedAt,
-		)
+		err := d.QueryRow(`SELECT id, name FROM providers WHERE id=?`, id).Scan(&row.ID, &row.Name)
 		if err != nil {
 			http.Error(w, `{"error":"not found"}`, 404)
 			return
+		}
+
+		rows, err := d.Query(`
+			SELECT id, label, auth_type, state, priority, created_at
+			FROM accounts WHERE provider_id=? ORDER BY label
+		`, id)
+		if err != nil {
+			http.Error(w, `{"error":"query accounts"}`, 500)
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var a AccountShort
+			rows.Scan(&a.ID, &a.Label, &a.AuthType, &a.State, &a.Priority, &a.CreatedAt)
+			row.Accounts = append(row.Accounts, a)
 		}
 		json.NewEncoder(w).Encode(row)
 	}
 }
 
+// UpdateProviderHandler updates provider and/or account info.
 func UpdateProviderHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		var req struct {
+			Name     string `json:"name"`
 			Label    string `json:"label"`
 			BaseURL  string `json:"base_url"`
 			AuthType string `json:"auth_type"`
 		}
 		json.NewDecoder(r.Body).Decode(&req)
+
 		d.EnqueueWriteSync(func(q *db.Queue) {
-			q.DB().Exec(`UPDATE providers SET label=?, base_url=?, auth_type=? WHERE id=?`,
-				req.Label, req.BaseURL, req.AuthType, id)
+			if req.Name != "" {
+				q.DB().Exec(`UPDATE providers SET name=? WHERE id=?`, req.Name, id)
+			}
+			// Update the first account for this provider (simple single-account model)
+			var acctID int64
+			q.DB().QueryRow(`SELECT id FROM accounts WHERE provider_id=? LIMIT 1`, id).Scan(&acctID)
+			if acctID > 0 {
+				updates := []string{}
+				args := []interface{}{}
+				if req.Label != "" {
+					updates = append(updates, "label=?")
+					args = append(args, req.Label)
+				}
+				if req.AuthType != "" {
+					updates = append(updates, "auth_type=?")
+					args = append(args, req.AuthType)
+				}
+				if req.BaseURL != "" {
+					enc, err := db.EncryptSecret(req.BaseURL)
+					if err == nil {
+						updates = append(updates, "encrypted_key=?")
+						args = append(args, enc)
+					}
+				}
+				if len(updates) > 0 {
+					q.DB().Exec(
+						"UPDATE accounts SET "+
+							fmt.Sprintf("%s WHERE id=?", joinStrings(updates, ","))+
+							"?", append(args, acctID)...,
+					)
+				}
+			}
 		})
 		w.WriteHeader(http.StatusOK)
 	}
 }
 
+// DeleteProviderHandler deletes a provider and its accounts.
 func DeleteProviderHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		d.EnqueueWriteSync(func(q *db.Queue) {
+			q.DB().Exec(`DELETE FROM accounts WHERE provider_id=?`, id)
 			q.DB().Exec(`DELETE FROM providers WHERE id=?`, id)
 		})
 		w.WriteHeader(http.StatusOK)
 	}
 }
 
-// --- Connections ---
+// --- Connections (accounts) ---
 
+// ListConnectionsHandler returns all accounts.
 func ListConnectionsHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
-		rows, err := d.Query(`SELECT id, provider_id, name, auth_type, disabled, priority, created_at FROM connections ORDER BY created_at DESC`)
+		rows, err := d.Query(`
+			SELECT a.id, a.provider_id, a.label, a.auth_type, a.state,
+			       a.priority, a.created_at, p.name AS provider_name
+			FROM accounts a
+			LEFT JOIN providers p ON a.provider_id = p.id
+			ORDER BY a.created_at DESC
+		`)
 		if err != nil {
 			http.Error(w, `{"error":"query"}`, 500)
 			return
 		}
 		defer rows.Close()
 		type C struct {
-			ID        int64  `json:"id"`
-			ProviderID string `json:"provider_id"`
-			Name      string `json:"name"`
-			AuthType  string `json:"auth_type"`
-			Disabled  bool   `json:"disabled"`
-			Priority  int    `json:"priority"`
-			CreatedAt int64  `json:"created_at"`
+			ID           int64  `json:"id"`
+			ProviderID   string `json:"provider_id"`
+			ProviderName string `json:"provider_name"`
+			Name         string `json:"name"`
+			AuthType     string `json:"auth_type"`
+			State        string `json:"state"`
+			Priority     int    `json:"priority"`
+			CreatedAt    int64  `json:"created_at"`
 		}
 		var out []C
 		for rows.Next() {
 			var c C
-			rows.Scan(&c.ID, &c.ProviderID, &c.Name, &c.AuthType, &c.Disabled, &c.Priority, &c.CreatedAt)
+			rows.Scan(&c.ID, &c.ProviderID, &c.Name, &c.AuthType, &c.State, &c.Priority, &c.CreatedAt, &c.ProviderName)
 			out = append(out, c)
 		}
 		if out == nil {
@@ -190,36 +325,50 @@ func ListConnectionsHandler(d *db.DB) http.HandlerFunc {
 	}
 }
 
+// CreateConnectionHandler creates a new account (connection).
 func CreateConnectionHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			ProviderID string `json:"provider_id"`
 			Name       string `json:"name"`
 			Secret     string `json:"secret"`
-			AuthType   string `json:"auth_type"` // api_key | oauth
+			AuthType   string `json:"auth_type"`
+			Priority   int    `json:"priority"`
 		}
 		json.NewDecoder(r.Body).Decode(&req)
 		if req.ProviderID == "" || req.Name == "" {
 			http.Error(w, `{"error":"provider_id and name required"}`, 400)
 			return
 		}
-		var encrypted string
+		authType := req.AuthType
+		if authType == "" {
+			authType = "api_key"
+		}
+		priority := req.Priority
+		if priority == 0 {
+			priority = 0
+		}
+
+		var encrypted sql.NullString
 		var err error
 		if req.Secret != "" {
-			encrypted, err = db.EncryptSecret(req.Secret)
-			if err != nil {
+			enc, e := db.EncryptSecret(req.Secret)
+			if e != nil {
 				http.Error(w, `{"error":"encrypt"}`, 500)
 				return
 			}
+			encrypted = sql.NullString{String: enc, Valid: true}
+			_ = err
 		}
+
 		var id int64
 		d.EnqueueWriteSync(func(q *db.Queue) {
 			res, e := q.DB().Exec(
-				`INSERT INTO connections (provider_id, name, auth_type, secret_enc, disabled) VALUES (?2, ?, ?3, 4)`,
-				req.ProviderID, req.Name, req.AuthType, encrypted,
+				`INSERT INTO accounts (provider_id, label, auth_type, encrypted_key, priority, state) VALUES (?, ?, ?, ?, ?, 'active')`,
+				req.ProviderID, req.Name, authType, encrypted, priority,
 			)
 			if e != nil {
-				http.Error(w, `{"error":"insert"}`, 500)
+				http.Error(w, fmt.Sprintf(`{"error":"insert: %v"}`, e), 500)
 				return
 			}
 			id, _ = res.LastInsertId()
@@ -229,27 +378,36 @@ func CreateConnectionHandler(d *db.DB) http.HandlerFunc {
 	}
 }
 
+// ToggleConnectionHandler toggles an account's state between active and disabled.
 func ToggleConnectionHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		var disabled bool
-		var curDisabled bool
+		var newState string
 		d.EnqueueWriteSync(func(q *db.Queue) {
-			q.DB().QueryRow(`SELECT disabled FROM connections WHERE id=?`, id).Scan(&curDisabled)
-			disabled = !curDisabled
-			q.DB().Exec(`UPDATE connections SET disabled=? WHERE id=?`, disabled, id)
+			var state string
+			q.DB().QueryRow(`SELECT state FROM accounts WHERE id=?`, id).Scan(&state)
+			if state == "disabled" {
+				newState = "active"
+			} else {
+				newState = "disabled"
+			}
+			q.DB().Exec(`UPDATE accounts SET state=? WHERE id=?`, newState, id)
 		})
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"id":%s,"disabled":%t}`, id, disabled)
+		fmt.Fprintf(w, `{"id":%s,"state":"%s"}`, id, newState)
 	}
 }
 
 // --- Proxy Pools ---
 
+// ListProxyPoolsHandler returns proxy pools.
 func ListProxyPoolsHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		_ = r
-		rows, err := d.Query(`SELECT id, label, description, proxy_list, status, last_checked, created_at FROM proxy_pools ORDER BY created_at DESC`)
+		rows, err := d.Query(`
+			SELECT id, name, ptype, proxy_url, no_proxy, is_active, strict_proxy, test_status, last_tested_at
+			FROM proxy_pools ORDER BY created_at DESC
+		`)
 		if err != nil {
 			http.Error(w, `{"error":"query"}`, 500)
 			return
@@ -257,17 +415,24 @@ func ListProxyPoolsHandler(d *db.DB) http.HandlerFunc {
 		defer rows.Close()
 		type PP struct {
 			ID          int64  `json:"id"`
-			Label       string `json:"label"`
-			Description string `json:"description"`
-			ProxyList   string `json:"proxy_list"`
-			Status      string `json:"status"`
-			LastChecked int64  `json:"last_checked"`
+			Name        string `json:"name"`
+			Ptype       string `json:"ptype"`
+			ProxyURL    string `json:"proxy_url"`
+			NoProxy     string `json:"no_proxy"`
+			IsActive    bool   `json:"is_active"`
+			StrictProxy bool   `json:"strict_proxy"`
+			TestStatus  string `json:"test_status"`
+			LastTested  int64  `json:"last_tested"`
 			CreatedAt   int64  `json:"created_at"`
 		}
 		var out []PP
 		for rows.Next() {
 			var p PP
-			rows.Scan(&p.ID, &p.Label, &p.Description, &p.ProxyList, &p.Status, &p.LastChecked, &p.CreatedAt)
+			var lastTestedNullable sql.NullInt64
+			rows.Scan(&p.ID, &p.Name, &p.Ptype, &p.ProxyURL, &p.NoProxy, &p.IsActive, &p.StrictProxy, &p.TestStatus, &lastTestedNullable)
+			if lastTestedNullable.Valid {
+				p.LastTested = lastTestedNullable.Int64
+			}
 			out = append(out, p)
 		}
 		if out == nil {
@@ -277,35 +442,44 @@ func ListProxyPoolsHandler(d *db.DB) http.HandlerFunc {
 	}
 }
 
+// CreateProxyPoolHandler creates a proxy pool.
 func CreateProxyPoolHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Label       string `json:"label"`
-			Description string `json:"description"`
-			ProxyList   string `json:"proxy_list"` // JSON array of strings
+			Name        string `json:"name"`
+			Ptype       string `json:"ptype"`
+			ProxyURL    string `json:"proxy_url"`
+			NoProxy     string `json:"no_proxy"`
+			IsActive    bool   `json:"is_active"`
+			StrictProxy bool   `json:"strict_proxy"`
 		}
 		json.NewDecoder(r.Body).Decode(&req)
-		if req.Label == "" {
-			http.Error(w, `{"error":"label required"}`, 400)
+		if req.Name == "" {
+			http.Error(w, `{"error":"name required"}`, 400)
 			return
+		}
+		ptype := req.Ptype
+		if ptype == "" {
+			ptype = "http"
 		}
 		var id int64
 		d.EnqueueWriteSync(func(q *db.Queue) {
 			res, e := q.DB().Exec(
-				`INSERT INTO proxy_pools (label, description, proxy_list, status) VALUES (?, ?, ?, 'idle')`,
-				req.Label, req.Description, req.ProxyList,
+				`INSERT INTO proxy_pools (name, ptype, proxy_url, no_proxy, is_active, strict_proxy) VALUES (?, ?, ?, ?, ?, ?)`,
+				req.Name, ptype, req.ProxyURL, req.NoProxy, req.IsActive, req.StrictProxy,
 			)
 			if e != nil {
-				http.Error(w, `{"error":"insert"}`, 500)
+				http.Error(w, fmt.Sprintf(`{"error":"insert: %v"}`, e), 500)
 				return
 			}
 			id, _ = res.LastInsertId()
 		})
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"id":%d,"label":"%s"}`, id, req.Label)
+		fmt.Fprintf(w, `{"id":%d,"name":"%s"}`, id, req.Name)
 	}
 }
 
+// DeleteProxyPoolHandler deletes a proxy pool.
 func DeleteProxyPoolHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
@@ -318,6 +492,7 @@ func DeleteProxyPoolHandler(d *db.DB) http.HandlerFunc {
 
 // --- Combos ---
 
+// ListCombosHandler returns all combos.
 func ListCombosHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		_ = r
@@ -348,6 +523,7 @@ func ListCombosHandler(d *db.DB) http.HandlerFunc {
 	}
 }
 
+// CreateComboHandler creates a combo.
 func CreateComboHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -369,11 +545,11 @@ func CreateComboHandler(d *db.DB) http.HandlerFunc {
 		var id int64
 		d.EnqueueWriteSync(func(q *db.Queue) {
 			res, e := q.DB().Exec(
-				`INSERT INTO combos (name, description, model_ids, strategy) VALUES (?, ?, ?, ?)`,
-				req.Name, req.Description, modelsJSON, strategy,
+				`INSERT INTO combos (name, description, model_ids, model_list, strategy) VALUES (?, ?, ?, ?, ?)`,
+				req.Name, req.Description, modelsJSON, modelsJSON, strategy,
 			)
 			if e != nil {
-				http.Error(w, `{"error":"insert"}`, 500)
+				http.Error(w, fmt.Sprintf(`{"error":"insert: %v"}`, e), 500)
 				return
 			}
 			id, _ = res.LastInsertId()
@@ -383,6 +559,7 @@ func CreateComboHandler(d *db.DB) http.HandlerFunc {
 	}
 }
 
+// DeleteComboHandler deletes a combo.
 func DeleteComboHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
@@ -395,27 +572,27 @@ func DeleteComboHandler(d *db.DB) http.HandlerFunc {
 
 // --- API Keys ---
 
+// ListAPIKeysHandler returns API keys.
 func ListAPIKeysHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		_ = r
-		rows, err := d.Query(`SELECT id, key_hash, label, revoked, last_used, created_at FROM api_keys ORDER BY created_at DESC`)
+		rows, err := d.Query(`SELECT id, key_hash, label, revoked, created_at FROM api_keys ORDER BY created_at DESC`)
 		if err != nil {
 			http.Error(w, `{"error":"query"}`, 500)
 			return
 		}
 		defer rows.Close()
 		type K struct {
-			ID       int64  `json:"id"`
-			KeyHash  string `json:"key_hash"`
-			Label    string `json:"label"`
-			Revoked  bool   `json:"revoked"`
-			LastUsed string `json:"last_used"`
-			CreatedAt int64 `json:"created_at"`
+			ID        int64  `json:"id"`
+			KeyHash   string `json:"key_hash"`
+			Label     string `json:"label"`
+			Revoked   bool   `json:"revoked"`
+			CreatedAt int64  `json:"created_at"`
 		}
 		var out []K
 		for rows.Next() {
 			var k K
-			rows.Scan(&k.ID, &k.KeyHash, &k.Label, &k.Revoked, &k.LastUsed, &k.CreatedAt)
+			rows.Scan(&k.ID, &k.KeyHash, &k.Label, &k.Revoked, &k.CreatedAt)
 			out = append(out, k)
 		}
 		if out == nil {
@@ -425,6 +602,7 @@ func ListAPIKeysHandler(d *db.DB) http.HandlerFunc {
 	}
 }
 
+// CreateAPIKeyHandler creates an API key.
 func CreateAPIKeyHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -444,6 +622,7 @@ func CreateAPIKeyHandler(d *db.DB) http.HandlerFunc {
 	}
 }
 
+// RevokeAPIKeyHandler revokes an API key.
 func RevokeAPIKeyHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
@@ -457,6 +636,7 @@ func RevokeAPIKeyHandler(d *db.DB) http.HandlerFunc {
 
 // --- Cost Handler ---
 
+// CostHandler returns cost estimates grouped by model.
 func CostHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		_ = r
@@ -472,11 +652,11 @@ func CostHandler(d *db.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 		type CostItem struct {
-			Model string `json:"model"`
-			TokIn int    `json:"tok_in"`
-			TokOut int   `json:"tok_out"`
-			N     int    `json:"n"`
-			Cost  float64 `json:"cost_usd"`
+			Model  string  `json:"model"`
+			TokIn  int     `json:"tok_in"`
+			TokOut int     `json:"tok_out"`
+			N      int     `json:"n"`
+			Cost   float64 `json:"cost_usd"`
 		}
 		var out []CostItem
 		for rows.Next() {
@@ -491,4 +671,8 @@ func CostHandler(d *db.DB) http.HandlerFunc {
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"costs": out})
 	}
+}
+
+func joinStrings(ss []string, sep string) string {
+	return strings.Join(ss, sep)
 }
