@@ -2,66 +2,83 @@
 import { ref, onMounted } from 'vue'
 const pools = ref<any[]>([])
 const showing = ref(false)
-const form = ref({ label: '', description: '', proxy_list: '' })
+const form = ref({ name: '', proxy_url: '', ptype: 'http', no_proxy: '', strict_proxy: false, is_active: true })
 
 async function load() {
-  const r = await fetch('/api/dashboard/proxy-pools').then(x=>x.json())
+  const r = await fetch('/api/dashboard/proxy-pools').then(x => x.json())
   pools.value = r.proxy_pools || []
 }
 async function create() {
-  if (!form.value.label) return
-  await fetch('/api/dashboard/proxy-pools', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(form.value) })
-  form.value = { label:'', description:'', proxy_list:'' }
+  if (!form.value.name) return
+  await fetch('/api/dashboard/proxy-pools', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: form.value.name, proxy_url: form.value.proxy_url, ptype: form.value.ptype,
+      no_proxy: form.value.no_proxy, strict_proxy: form.value.strict_proxy ? 1 : 0, is_active: form.value.is_active
+    })
+  })
+  form.value = { name: '', proxy_url: '', ptype: 'http', no_proxy: '', strict_proxy: false, is_active: true }
   showing.value = false
   await load()
 }
-async function del(id:number) {
-  await fetch(`/api/dashboard/proxy-pools/${id}`, { method:'DELETE' })
+async function del(id: number) {
+  await fetch(`/api/dashboard/proxy-pools/${id}`, { method: 'DELETE' })
   await load()
 }
+const stateClass = (p: any) => {
+  if (p.test_status === 'healthy' || p.test_status === 'idle') return 'st ok'
+  if (p.test_status === 'deactivated') return 'st err'
+  return 'st ok'
+}
+const stateText = (p: any) => p.test_status || 'idle'
 onMounted(load)
 </script>
 <template>
   <div>
-    <div class="flex justify-between items-center mb-4">
-      <h2 class="text-xl font-bold">Proxy Pools</h2>
-      <button @click="showing=!showing" class="btn-primary">+ New Pool</button>
+    <div class="page-head">
+      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0">Proxy Pools</h2>
+      <button class="btn" @click="showing=true">+ New Pool</button>
     </div>
-    <div v-if="showing" class="bg-gray-900 rounded-lg p-4 mb-4 border border-gray-800">
-      <h3 class="font-semibold mb-3">New Proxy Pool</h3>
-      <div class="space-y-3">
-        <input v-model="form.label" placeholder="Pool name" class="input" />
-        <input v-model="form.description" placeholder="Description" class="input" />
-        <textarea v-model="form.proxy_list" placeholder='Proxy list (one per line: http://host:port or socks5://host:port)' class="input" rows="4" />
+    <div v-if="showing" class="card">
+      <h3>New Proxy Pool</h3>
+      <div class="kv" style="margin-bottom:.8rem">
+        <dt>Name</dt><dd><input v-model="form.name" class="input" placeholder="e.g. fast-us-1" /></dd>
+        <dt>Type</dt><dd>
+          <select v-model="form.ptype" class="select">
+            <option value="http">http</option><option value="socks5">socks5</option><option value="relay">relay</option>
+          </select>
+        </dd>
+        <dt>Proxy URL</dt><dd><input v-model="form.proxy_url" class="input" placeholder="http://host:port or socks5://host:port" /></dd>
+        <dt>No Proxy</dt><dd><input v-model="form.no_proxy" class="input" placeholder="localhost,10.0.0.0/8" /></dd>
+        <dt>Strict Proxy</dt><dd><label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" v-model="form.strict_proxy" /> Yes</label></dd>
+        <dt>Active</dt><dd><label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" v-model="form.is_active" /> Yes</label></dd>
       </div>
-      <div class="mt-3 flex gap-2">
-        <button @click="create" class="btn-primary">Save</button>
-        <button @click="showing=false" class="btn-secondary">Cancel</button>
+      <div style="display:flex;gap:.5rem">
+        <button class="btn" @click="create">Save</button>
+        <button class="btn ghost" @click="showing=false">Cancel</button>
       </div>
     </div>
-    <div class="bg-gray-900 rounded-lg border border-gray-800 overflow-hidden">
-      <table class="w-full text-sm">
-        <thead class="bg-gray-800 text-gray-400"><tr>
-          <th class="text-left p-3">Label</th><th class="text-left p-3">Status</th>
-          <th class="text-left p-3">Proxies</th><th class="text-right p-3"></th>
-        </tr></thead>
-        <tbody>
-          <tr v-for="p in pools" :key="p.id" class="border-t border-gray-800">
-            <td class="p-3 font-medium">{{ p.label }}</td>
-            <td class="p-3"><span :class="{'text-green-400':p.status==='healthy'||p.status==='idle','text-red-400':p.status==='deactivated'}">{{ p.status||'idle' }}</span></td>
-            <td class="p-3 font-mono text-xs max-w-xs truncate">{{ p.proxy_list?.slice(1,-1)?.split(',').join(', ') }}</td>
-            <td class="p-3 text-right"><button @click="del(p.id)" class="btn-danger btn-sm">Delete</button></td>
-          </tr>
-          <tr v-if="pools.length===0"><td colspan="4" class="p-6 text-center text-gray-600">No proxy pools</td></tr>
-        </tbody>
-      </table>
+    <div class="grid3">
+      <div v-for="p in pools" :key="p.id" class="card" style="margin-bottom:0">
+        <h3>{{ p.name }} <span :class="stateClass(p)">{{ stateText(p) }}</span></h3>
+        <div class="kv">
+          <dt>Type</dt><dd>{{ p.ptype }}</dd>
+          <dt>URL</dt><dd class="font-mono" style="font-size:.75rem">{{ p.proxy_url || '—' }}</dd>
+          <dt>noProxy</dt><dd>{{ p.no_proxy || '—' }}</dd>
+          <dt>Strict</dt><dd>{{ p.strict_proxy ? '✓' : '—' }}</dd>
+        </div>
+        <div style="display:flex;gap:.5rem;margin-top:.5rem">
+          <button class="btn ghost btn-sm">Test</button>
+          <button class="btn-danger btn-sm" @click="del(p.id)">Delete</button>
+        </div>
+        <p class="note">last test {{ p.last_tested ? new Date(p.last_tested * 1000).toLocaleString() : 'never' }}</p>
+      </div>
     </div>
+    <div v-if="pools.length===0 && !showing" class="note" style="text-align:center;padding:2rem">No proxy pools configured</div>
   </div>
 </template>
 <style scoped>
-.input { @apply bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm w-full; }
-.btn-primary { @apply bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium; }
-.btn-secondary { @apply bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 py-2 rounded text-sm; }
-.btn-danger { @apply bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs; }
-.btn-sm { @apply px-2 py-1 text-xs; }
+.page-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; }
+.btn-danger { background:var(--jkr-red); color:var(--jkr-crust); border:none; padding:.25rem .5rem; border-radius:4px; font-size:.7rem; cursor:pointer; }
+.font-mono { font-family:ui-monospace,'Cascadia Code',monospace; }
 </style>

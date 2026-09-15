@@ -1,71 +1,65 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-const stats = ref({ total: 0, success: 0, errors: 0, avgLatency: 0, costUSD: 0 })
+const stats = ref({ requests: 0, tokensIn: 0, cost: 0, p95Latency: 0 })
 const recent = ref<any[]>([])
+const loading = ref(true)
 
 async function load() {
-  const [u, c] = await Promise.all([
-    fetch('/api/dashboard/usage').then(r => r.json()),
-    fetch('/api/dashboard/usage/cost').then(r => r.json()),
-  ])
-  const usage = u.usage || []
-  stats.value = {
-    total: usage.length,
-    success: usage.filter(x => x.status === 'success').length,
-    errors: usage.filter(x => x.status === 'error').length,
-    avgLatency: usage.length ? Math.round(usage.reduce((s:number,x:number)=>s+x.latency_ms,0)/usage.length) : 0,
-    costUSD: (c.costs||[]).reduce((s:number,x:any)=>s+x.cost_usd,0).toFixed(4),
+  try {
+    const [u, c] = await Promise.all([
+      fetch('/api/dashboard/usage?limit=20').then(r => r.json()),
+      fetch('/api/dashboard/usage/stats').then(r => r.json()).catch(() => ({ requests: 0, tokens_in: 0, cost: 0, p95_ms: 0 })),
+    ])
+    const list = u.usage || []
+    recent.value = list
+    if (c.requests !== undefined) {
+      stats.value = { requests: c.requests, tokensIn: c.tokens_in, cost: c.cost, p95Latency: c.p95_ms }
+    } else {
+      // Fallback: compute from raw data
+      const success = list.filter(x => x.status === 'success')
+      stats.value = {
+        requests: list.length,
+        tokensIn: list.reduce((s: number, x: any) => s + (x.tok_in || 0), 0),
+        cost: list.reduce((s: number, x: any) => s + (x.cost_usd || 0), 0).toFixed(4),
+        p95Latency: 0,
+      }
+    }
+  } finally {
+    loading.value = false
   }
-  recent.value = usage.slice(0, 10)
 }
 onMounted(load)
 </script>
 <template>
   <div>
-    <h2 class="text-xl font-bold mb-4">Dashboard</h2>
-    <div class="grid grid-cols-4 gap-4 mb-6">
-      <div class="stat-card">
-        <div class="stat-label">Total Requests</div>
-        <div class="stat-value">{{ stats.total }}</div>
+    <h2 class="text-xl font-bold mb-4" style="color:var(--jkr-txt)">Dashboard</h2>
+    <div v-if="loading" class="note" style="padding:2rem;text-align:center">Loading…</div>
+    <template v-else>
+      <div class="grid4 mb-6">
+        <div class="card stat-card"><div class="n">{{ stats.requests }}</div><div class="l">requests</div></div>
+        <div class="card stat-card"><div class="n">{{ stats.tokensIn.toLocaleString() }}</div><div class="l">tokens in</div></div>
+        <div class="card stat-card"><div class="n">${{ typeof stats.cost === 'number' ? stats.cost.toFixed(4) : stats.cost }}</div><div class="l">est. cost</div></div>
+        <div class="card stat-card"><div class="n">{{ stats.p95Latency }}ms</div><div class="l">p95 latency</div></div>
       </div>
-      <div class="stat-card">
-        <div class="stat-label">Success</div>
-        <div class="stat-value text-green-400">{{ stats.success }}</div>
+      <div class="card">
+        <h3>Recent Requests</h3>
+        <table class="table">
+          <thead><tr>
+            <th>Time</th><th>Model</th><th>Provider</th><th>Status</th><th>Latency</th><th>Tokens</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="r in recent" :key="r.request_id">
+              <td style="color:var(--jkr-mut);font-size:.75rem">{{ r.ts?.slice(11,19) }}</td>
+              <td class="font-mono" style="font-size:.75rem">{{ r.model }}</td>
+              <td>{{ r.provider }}</td>
+              <td><span :class="r.status==='success'?'st ok':'st err'">{{ r.status }}</span></td>
+              <td>{{ r.latency_ms }}ms</td>
+              <td class="font-mono" style="font-size:.75rem">{{ r.tok_in ?? 0 }}+{{ r.tok_out ?? 0 }}</td>
+            </tr>
+            <tr v-if="recent.length===0"><td colspan="6" class="note" style="text-align:center;padding:1rem">No usage data yet</td></tr>
+          </tbody>
+        </table>
       </div>
-      <div class="stat-card">
-        <div class="stat-label">Errors</div>
-        <div class="stat-value text-red-400">{{ stats.errors }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Est. Cost</div>
-        <div class="stat-value text-yellow-400">${{ stats.costUSD }}</div>
-      </div>
-    </div>
-    <div class="bg-gray-900 rounded-lg p-4">
-      <h3 class="font-semibold mb-3">Recent Requests</h3>
-      <table class="w-full text-sm">
-        <thead><tr class="text-gray-500 border-b border-gray-800">
-          <th class="text-left pb-2">Time</th><th class="text-left pb-2">Model</th>
-          <th class="text-left pb-2">Provider</th><th class="text-left pb-2">Status</th>
-          <th class="text-left pb-2">Latency</th><th class="text-right pb-2">Tokens</th>
-        </tr></thead>
-        <tbody>
-          <tr v-for="r in recent" :key="r.request_id" class="border-b border-gray-800 last:border-0">
-            <td class="py-2 text-gray-400">{{ r.ts?.slice(5) }}</td>
-            <td class="py-2 font-mono text-xs">{{ r.model }}</td>
-            <td class="py-2">{{ r.provider }}</td>
-            <td class="py-2"><span :class="r.status==='success'?'text-green-400':'text-red-400'">{{ r.status }}</span></td>
-            <td class="py-2">{{ r.latency_ms }}ms</td>
-            <td class="py-2 text-right font-mono text-xs">{{ r.tok_in }}+{{ r.tok_out }}</td>
-          </tr>
-          <tr v-if="recent.length===0"><td colspan="6" class="py-4 text-center text-gray-600">No usage data yet</td></tr>
-        </tbody>
-      </table>
-    </div>
+    </template>
   </div>
 </template>
-<style scoped>
-.stat-card { @apply bg-gray-900 rounded-lg p-4 border border-gray-800; }
-.stat-label { @apply text-xs text-gray-500 uppercase tracking-wide; }
-.stat-value { @apply text-2xl font-bold mt-1; }
-</style>

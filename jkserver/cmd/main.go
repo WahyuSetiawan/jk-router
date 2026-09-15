@@ -21,6 +21,9 @@ import (
 
 func main() {
 	args := os.Args[1:]
+	if len(args) == 0 {
+		args = []string{"serve"}
+	}
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		if args[0] == "--help" || args[0] == "-h" {
 			fmt.Fprintf(os.Stderr, `JKRouter - AI Routing Gateway

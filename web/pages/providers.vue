@@ -1,65 +1,82 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 const providers = ref<any[]>([])
-const showing = ref(false)
-const form = ref({ label: '', base_url: '', auth_type: 'api_key' })
+const showAdd = ref(false)
+const form = ref({ name: '', label: '', auth_type: 'api_key', base_url: '' })
+const search = ref('')
 
 async function load() {
-  const r = await fetch('/api/dashboard/providers').then(x=>x.json())
+  const r = await fetch('/api/dashboard/providers').then(x => x.json())
   providers.value = r.providers || []
 }
 async function create() {
-  await fetch('/api/dashboard/providers', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(form.value) })
-  form.value = { label:'', base_url:'', auth_type:'api_key' }
-  showing.value = false
+  if (!form.value.name) return
+  await fetch('/api/dashboard/providers', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: form.value.name, label: form.value.label, auth_type: form.value.auth_type, base_url: form.value.base_url })
+  })
+  form.value = { name: '', label: '', auth_type: 'api_key', base_url: '' }
+  showAdd.value = false
   await load()
+}
+const filtered = () => {
+  if (!search.value) return providers.value
+  const s = search.value.toLowerCase()
+  return providers.value.filter(p => p.name.toLowerCase().includes(s) || p.accounts?.some(a => a.label.toLowerCase().includes(s)))
 }
 onMounted(load)
 </script>
 <template>
   <div>
-    <div class="flex justify-between items-center mb-4">
-      <h2 class="text-xl font-bold">Providers</h2>
-      <button @click="showing=!showing" class="btn-primary">+ Add Provider</button>
-    </div>
-    <div v-if="showing" class="bg-gray-900 rounded-lg p-4 mb-4 border border-gray-800">
-      <h3 class="font-semibold mb-3">New Provider</h3>
-      <div class="grid grid-cols-3 gap-3">
-        <input v-model="form.label" placeholder="Label (e.g. my-openai)" class="input" />
-        <input v-model="form.base_url" placeholder="Base URL" class="input" />
-        <select v-model="form.auth_type" class="input">
-          <option>api_key</option><option>oauth</option>
-        </select>
-      </div>
-      <div class="mt-3 flex gap-2">
-        <button @click="create" class="btn-primary">Save</button>
-        <button @click="showing=false" class="btn-secondary">Cancel</button>
+    <div class="page-head">
+      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0">Providers</h2>
+      <div style="display:flex;gap:.5rem;align-items:center">
+        <input v-model="search" class="search" style="flex:1;max-width:240px" placeholder="Cari provider…" />
+        <button class="btn" @click="showAdd=true">+ Add API Key</button>
+        <button class="btn ghost" @click="showAdd=true;form.auth_type='oauth'">+ Connect OAuth</button>
       </div>
     </div>
-    <div class="bg-gray-900 rounded-lg border border-gray-800 overflow-hidden">
-      <table class="w-full text-sm">
-        <thead class="bg-gray-800 text-gray-400"><tr>
-          <th class="text-left p-3">Label</th><th class="text-left p-3">Auth</th>
-          <th class="text-left p-3">Base URL</th><th class="text-right p-3"></th>
-        </tr></thead>
-        <tbody>
-          <tr v-for="p in providers" :key="p.id" class="border-t border-gray-800">
-            <td class="p-3 font-medium">{{ p.label }}</td>
-            <td class="p-3"><span class="badge">{{ p.auth_type }}</span></td>
-            <td class="p-3 font-mono text-xs">{{ p.base_url }}</td>
-            <td class="p-3 text-right"><button class="btn-danger btn-sm">Delete</button></td>
-          </tr>
-          <tr v-if="providers.length===0"><td colspan="4" class="p-6 text-center text-gray-600">No providers configured</td></tr>
-        </tbody>
-      </table>
+    <div v-if="showAdd" class="card" style="margin-bottom:1rem">
+      <h3>New Provider Account</h3>
+      <div class="kv" style="margin-bottom:.8rem">
+        <dt>Provider Name</dt><dd><input v-model="form.name" class="input" placeholder="e.g. openai" /></dd>
+        <dt>Account Label</dt><dd><input v-model="form.label" class="input" placeholder="e.g. work-mail" /></dd>
+        <dt>Auth Type</dt><dd>
+          <select v-model="form.auth_type" class="select">
+            <option value="api_key">API Key</option><option value="oauth">OAuth</option>
+          </select>
+        </dd>
+        <dt>Base URL</dt><dd><input v-model="form.base_url" class="input" placeholder="https://api.openai.com" /></dd>
+      </div>
+      <div style="display:flex;gap:.5rem">
+        <button class="btn" @click="create">Save</button>
+        <button class="btn ghost" @click="showAdd=false">Cancel</button>
+      </div>
     </div>
+    <template v-for="p in filtered()" :key="p.id">
+      <div class="card">
+        <h3>{{ p.name }} <span class="st active">{{ p.accounts?.length ?? 0 }} akun</span></h3>
+        <table class="table">
+          <thead><tr><th>Name</th><th>Type</th><th>Priority</th><th>State</th></tr></thead>
+          <tbody>
+            <tr v-for="a in p.accounts" :key="a.id">
+              <td class="font-medium">{{ a.label }}</td>
+              <td><span class="chip">{{ a.auth_type }}</span></td>
+              <td>{{ a.priority ?? '—' }}</td>
+              <td>
+                <span v-if="a.state==='active'" class="st active">active</span>
+                <span v-else-if="a.state==='cooling_down'" class="st cooling">cooling_down</span>
+                <span v-else class="st disabled">disabled</span>
+              </td>
+            </tr>
+            <tr v-if="!p.accounts?.length"><td colspan="4" class="note" style="text-align:center;padding:.5rem">No accounts — add one above</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
+    <div v-if="filtered().length===0 && !showAdd" class="note" style="text-align:center;padding:2rem">No providers configured</div>
   </div>
 </template>
 <style scoped>
-.input { @apply bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm w-full; }
-.btn-primary { @apply bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium; }
-.btn-secondary { @apply bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 py-2 rounded text-sm; }
-.btn-danger { @apply bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs; }
-.btn-sm { @apply px-2 py-1 text-xs; }
-.badge { @apply bg-gray-800 text-gray-300 px-2 py-0.5 rounded text-xs; }
+.page-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; }
 </style>

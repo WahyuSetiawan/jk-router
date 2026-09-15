@@ -3,61 +3,69 @@ import { ref, onMounted } from 'vue'
 const keys = ref<any[]>([])
 const showing = ref(false)
 const newKey = ref('')
+const copied = ref<number | null>(null)
 
 async function load() {
-  const r = await fetch('/api/dashboard/api-keys').then(x=>x.json())
+  const r = await fetch('/api/dashboard/api-keys').then(x => x.json())
   keys.value = r.keys || []
 }
 async function create() {
-  const r = await fetch('/api/dashboard/api-keys', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ label: 'user-key-' + Date.now() }) })
+  const r = await fetch('/api/dashboard/api-keys', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label: 'user-key-' + Date.now() })
+  })
   const j = await r.json()
   newKey.value = j.key || ''
   showing.value = false
   await load()
 }
-async function revoke(id:number) {
-  await fetch(`/api/dashboard/api-keys/${id}/revoke`, { method:'POST' })
+async function revoke(id: number) {
+  await fetch(`/api/dashboard/api-keys/${id}/revoke`, { method: 'POST' })
   await load()
+}
+async function copyKey(id: number, rawKey: string) {
+  await navigator.clipboard.writeText(rawKey)
+  copied.value = id
+  setTimeout(() => { copied.value = null }, 1500)
 }
 onMounted(load)
 </script>
 <template>
   <div>
-    <div class="flex justify-between items-center mb-4">
-      <h2 class="text-xl font-bold">API Keys</h2>
-      <button @click="showing=!showing" class="btn-primary">+ Generate Key</button>
+    <div class="page-head">
+      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0">API Keys</h2>
+      <button class="btn" @click="showing=true">+ Generate</button>
     </div>
-    <div v-if="newKey" class="bg-yellow-900/30 border border-yellow-700 rounded-lg p-4 mb-4">
-      <p class="text-yellow-300 text-sm mb-2">Save this key — it won't be shown again:</p>
-      <code class="text-yellow-200 text-sm break-all">{{ newKey }}</code>
+    <p class="note" style="margin-bottom:1rem">Client pakai key ini ke /v1 — bukan key provider upstream.</p>
+    <div v-if="newKey" class="card" style="background:#f9e2af22;border-color:var(--jkr-yel)">
+      <p style="color:var(--jkr-yel);font-size:.8rem;margin-bottom:.5rem">Save this key — it won't be shown again:</p>
+      <code style="color:var(--jkr-txt);font-size:.85rem;word-break:break-all">{{ newKey }}</code>
     </div>
-    <div v-if="showing" class="bg-gray-900 rounded-lg p-4 mb-4 border border-gray-800">
-      <button @click="create" class="btn-primary">Generate</button>
-      <button @click="showing=false" class="btn-secondary ml-2">Cancel</button>
+    <div v-if="showing" class="card">
+      <button class="btn" @click="create">Generate</button>
+      <button class="btn ghost" style="margin-left:.5rem" @click="showing=false">Cancel</button>
     </div>
-    <div class="bg-gray-900 rounded-lg border border-gray-800 overflow-hidden">
-      <table class="w-full text-sm">
-        <thead class="bg-gray-800 text-gray-400"><tr>
-          <th class="text-left p-3">Label</th><th class="text-left p-3">Key Hash</th>
-          <th class="text-left p-3">Status</th><th class="text-left p-3">Created</th><th class="text-right p-3"></th>
-        </tr></thead>
+    <div class="card">
+      <table class="table">
+        <thead><tr><th>Name</th><th>Key</th><th>Status</th><th>Created</th><th></th></tr></thead>
         <tbody>
-          <tr v-for="k in keys" :key="k.id" class="border-t border-gray-800">
-            <td class="p-3 font-medium">{{ k.label || '(no label)' }}</td>
-            <td class="p-3 font-mono text-xs">{{ k.key_hash?.slice(0,16) }}...</td>
-            <td class="p-3"><span :class="k.revoked?'text-red-400':'text-green-400'">{{ k.revoked?'Revoked':'Active' }}</span></td>
-            <td class="p-3 text-gray-400 text-xs">{{ new Date(k.created_at*1000).toLocaleDateString() }}</td>
-            <td class="p-3 text-right"><button v-if="!k.revoked" @click="revoke(k.id)" class="btn-danger btn-sm">Revoke</button></td>
+          <tr v-for="k in keys" :key="k.id">
+            <td class="font-medium">{{ k.label || '(no label)' }}</td>
+            <td class="font-mono" style="font-size:.75rem">{{ k.key_hash?.slice(0,12) }}…</td>
+            <td><span :class="k.revoked?'st disabled':'st active'">{{ k.revoked ? 'Revoked' : 'Active' }}</span></td>
+            <td style="color:var(--jkr-mut);font-size:.75rem">{{ new Date(k.created_at * 1000).toLocaleDateString() }}</td>
+            <td style="text-align:right">
+              <button v-if="!k.revoked" class="btn ghost btn-sm" style="margin-right:.3rem" @click="copyKey(k.id, k.key_display || '')">Copy</button>
+              <button v-if="!k.revoked" class="btn-danger btn-sm" @click="revoke(k.id)">Revoke</button>
+            </td>
           </tr>
-          <tr v-if="keys.length===0"><td colspan="5" class="p-6 text-center text-gray-600">No API keys</td></tr>
+          <tr v-if="keys.length===0"><td colspan="5" class="note" style="text-align:center;padding:1rem">No API keys</td></tr>
         </tbody>
       </table>
     </div>
   </div>
 </template>
 <style scoped>
-.btn-primary { @apply bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium; }
-.btn-secondary { @apply bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 py-2 rounded text-sm; }
-.btn-danger { @apply bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs; }
-.btn-sm { @apply px-2 py-1 text-xs; }
+.page-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem; }
+.btn-danger { background:var(--jkr-red); color:var(--jkr-crust); border:none; padding:.25rem .5rem; border-radius:4px; font-size:.7rem; cursor:pointer; }
 </style>

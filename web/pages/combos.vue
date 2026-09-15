@@ -2,67 +2,71 @@
 import { ref, onMounted } from 'vue'
 const combos = ref<any[]>([])
 const showing = ref(false)
-const form = ref({ name: '', description: '', model_ids: [] as string[] })
+const form = ref({ name: '', description: '', model_ids: '' as string, strategy: 'fallback' })
 
 async function load() {
-  const r = await fetch('/api/dashboard/combos').then(x=>x.json())
+  const r = await fetch('/api/dashboard/combos').then(x => x.json())
   combos.value = r.combos || []
 }
 async function create() {
   if (!form.value.name) return
-  await fetch('/api/dashboard/combos', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(form.value) })
-  form.value = { name:'', description:'', model_ids:[] }
+  // Parse comma-separated string into array
+  const ids = form.value.model_ids.split(',').map(s => s.trim()).filter(Boolean)
+  await fetch('/api/dashboard/combos', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: form.value.name, description: form.value.description, model_ids: ids, strategy: form.value.strategy })
+  })
+  form.value = { name: '', description: '', model_ids: '', strategy: 'fallback' }
   showing.value = false
   await load()
 }
-async function del(id:number) {
-  await fetch(`/api/dashboard/combos/${id}`, { method:'DELETE' })
+async function del(id: number) {
+  await fetch(`/api/dashboard/combos/${id}`, { method: 'DELETE' })
   await load()
+}
+const modelList = (c: any) => {
+  try { return JSON.parse(c.model_ids || '[]') } catch { return [] }
 }
 onMounted(load)
 </script>
 <template>
   <div>
-    <div class="flex justify-between items-center mb-4">
-      <h2 class="text-xl font-bold">Combos</h2>
-      <button @click="showing=!showing" class="btn-primary">+ New Combo</button>
+    <div class="page-head">
+      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0">Combos</h2>
+      <button class="btn" @click="showing=true">+ New Combo</button>
     </div>
-    <div v-if="showing" class="bg-gray-900 rounded-lg p-4 mb-4 border border-gray-800">
-      <h3 class="font-semibold mb-3">New Combo</h3>
-      <div class="space-y-3">
-        <input v-model="form.name" placeholder="Combo name (e.g. fast-vision)" class="input" />
-        <input v-model="form.description" placeholder="Description" class="input" />
-        <input v-model="form.model_ids" placeholder='Model IDs, comma-separated (e.g. gpt-4o,claude-sonnet-4)' class="input" />
+    <div v-if="showing" class="card">
+      <h3>New Combo</h3>
+      <div class="kv" style="margin-bottom:.8rem">
+        <dt>Name</dt><dd><input v-model="form.name" class="input" placeholder="e.g. fast-vision" /></dd>
+        <dt>Strategy</dt><dd>
+          <select v-model="form.strategy" class="select">
+            <option value="fallback">fallback</option><option value="round_robin">round_robin</option>
+          </select>
+        </dd>
+        <dt>Models</dt><dd><input v-model="form.model_ids" class="input" placeholder="gpt-4o, claude-sonnet-4, kimi-k2.5 (comma-separated)" /></dd>
+        <dt>Description</dt><dd><input v-model="form.description" class="input" placeholder="Optional description" /></dd>
       </div>
-      <div class="mt-3 flex gap-2">
-        <button @click="create" class="btn-primary">Save</button>
-        <button @click="showing=false" class="btn-secondary">Cancel</button>
+      <div style="display:flex;gap:.5rem">
+        <button class="btn" @click="create">Save</button>
+        <button class="btn ghost" @click="showing=false">Cancel</button>
       </div>
     </div>
-    <div class="bg-gray-900 rounded-lg border border-gray-800 overflow-hidden">
-      <table class="w-full text-sm">
-        <thead class="bg-gray-800 text-gray-400"><tr>
-          <th class="text-left p-3">Name</th><th class="text-left p-3">Strategy</th>
-          <th class="text-left p-3">Models</th><th class="text-right p-3"></th>
-        </tr></thead>
-        <tbody>
-          <tr v-for="c in combos" :key="c.id" class="border-t border-gray-800">
-            <td class="p-3 font-medium">{{ c.name }}</td>
-            <td class="p-3"><span class="badge">{{ c.strategy || 'fallback' }}</span></td>
-            <td class="p-3 font-mono text-xs">{{ c.model_ids?.slice(1,-1)?.split(',').join(', ') }}</td>
-            <td class="p-3 text-right"><button @click="del(c.id)" class="btn-danger btn-sm">Delete</button></td>
-          </tr>
-          <tr v-if="combos.length===0"><td colspan="4" class="p-6 text-center text-gray-600">No combos yet</td></tr>
-        </tbody>
-      </table>
-    </div>
+    <template v-for="c in combos" :key="c.id">
+      <div class="card">
+        <h3>{{ c.name }} <span class="st active">{{ c.strategy || 'fallback' }}</span></h3>
+        <ol style="font-size:.8rem;padding-left:1.2rem;margin:0">
+          <li v-for="m in modelList(c)" :key="m" style="margin-bottom:.2rem">{{ m }}</li>
+        </ol>
+        <p v-if="c.description" class="note">{{ c.description }}</p>
+        <div style="text-align:right;margin-top:.5rem"><button class="btn-danger btn-sm" @click="del(c.id)">Delete</button></div>
+      </div>
+    </template>
+    <div v-if="combos.length===0 && !showing" class="note" style="text-align:center;padding:2rem">No combos configured</div>
   </div>
 </template>
 <style scoped>
-.input { @apply bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm w-full; }
-.btn-primary { @apply bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium; }
-.btn-secondary { @apply bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 py-2 rounded text-sm; }
-.btn-danger { @apply bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs; }
-.btn-sm { @apply px-2 py-1 text-xs; }
-.badge { @apply bg-gray-800 text-gray-300 px-2 py-0.5 rounded text-xs; }
+.page-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; }
+.btn-danger { background:var(--jkr-red); color:var(--jkr-crust); border:none; padding:.25rem .5rem; border-radius:4px; font-size:.7rem; cursor:pointer; }
+.btn-sm { padding: .2rem .5rem; font-size: .7rem; }
 </style>

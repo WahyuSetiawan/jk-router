@@ -4,6 +4,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"crypto/sha256"
 	"fmt"
 	"net/http"
 	"strings"
@@ -51,6 +52,14 @@ func DashboardRouter(d *db.DB) chi.Router {
 	r.Get("/usage", UsageHandler(d))
 	r.Post("/usage/tail", UsageTailHandler(d))
 	r.Get("/usage/cost", CostHandler(d))
+
+	r.Get("/usage/stats", UsageStatsHandler(d))
+	r.Get("/settings", GetSettingsHandler(d))
+	r.Put("/settings", PutSettingsHandler(d))
+	r.Get("/auth/status", AuthStatusHandler(d))
+	r.Post("/auth/change-password", ChangePasswordHandler(d))
+	r.Get("/config/export", ExportConfigHandler(d))
+	r.Post("/config/import", ImportConfigHandler(d))
 
 	return r
 }
@@ -675,4 +684,239 @@ func CostHandler(d *db.DB) http.HandlerFunc {
 
 func joinStrings(ss []string, sep string) string {
 	return strings.Join(ss, sep)
+}
+
+// --- New handlers for redesigned dashboard ---
+
+// UsageStatsHandler returns aggregated usage stats for the last 7 days.
+func UsageStatsHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_ = r
+		var total, success, errors, tokensIn int
+		var p95 int64
+		row := d.QueryRow("SELECT COUNT(*), COALESCE(SUM(CASE WHEN status='success' THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN status='error' OR status='fallback' THEN 1 ELSE 0 END),0), COALESCE(SUM(tok_in),0) FROM usage_log WHERE ts >= datetime('now', '-7 days')")
+		row.Scan(&total, &success, &errors, &tokensIn)
+		row2 := d.QueryRow("SELECT COALESCE(AVG(latency_ms),0) FROM usage_log WHERE ts >= datetime('now', '-7 days') AND status='success'")
+		row2.Scan(&p95)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"requests":  total,
+			"success":   success,
+			"errors":    errors,
+			"tokens_in": tokensIn,
+			"cost":      0.0,
+			"p95_ms":    p95,
+		})
+	}
+}
+
+// GetSettingsHandler returns dashboard server settings.
+func GetSettingsHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		sv := func(key string) string {
+			var v string
+			if err := d.QueryRow("SELECT value FROM settings_kv WHERE key=?", key).Scan(&v); err != nil {
+				return ""
+			}
+			return v
+		}
+		settings := map[string]interface{}{}
+		if v := sv("port"); v != "" {
+			settings["port"] = v
+		}
+		if v := sv("bind"); v != "" {
+			settings["bind"] = v
+		}
+		if v := sv("data_dir"); v != "" {
+			settings["data_dir"] = v
+		}
+		if v := sv("log_buffer"); v != "" {
+			settings["log_buffer"] = v
+		}
+		if v := sv("wal_interval"); v != "" {
+			settings["wal_interval"] = v
+		}
+		if v := sv("cooldown_429"); v != "" {
+			settings["cooldown_429"] = v
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"settings": settings})
+	}
+}
+
+// PutSettingsHandler updates dashboard server settings.
+func PutSettingsHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Port         string `json:"port"`
+			Bind         string `json:"bind"`
+			DataDir      string `json:"dataDir"`
+			LogBuffer    string `json:"logBuffer"`
+			WalInterval  string `json:"walInterval"`
+			Cooldown429  string `json:"cooldown429"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, `{"error":"decode"}`, 400)
+			return
+		}
+		set := func(key, val string) {
+			if val == "" {
+				return
+			}
+			d.Exec("INSERT OR REPLACE INTO settings_kv (key, value) VALUES (?, ?)", key, val)
+		}
+		set("port", body.Port)
+		set("bind", body.Bind)
+		set("data_dir", body.DataDir)
+		set("log_buffer", body.LogBuffer)
+		set("wal_interval", body.WalInterval)
+		set("cooldown_429", body.Cooldown429)
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}
+}
+
+// AuthStatusHandler returns whether dashboard password is configured.
+func AuthStatusHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		var hash string
+		err := d.QueryRow("SELECT value FROM settings_kv WHERE key='dashboard_password_hash'").Scan(&hash)
+		firstRun := err == nil
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"first_run": firstRun,
+			"has_password": !firstRun,
+		})
+	}
+}
+
+// ChangePasswordHandler sets or changes the dashboard password.
+func ChangePasswordHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Current string `json:"current"`
+			New     string `json:"new"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, `{"error":"decode"}`, 400)
+			return
+		}
+		if len(body.New) < 6 {
+			http.Error(w, `{"error":"password too short"}`, 400)
+			return
+		}
+		// Check current password if changing
+		var existingHash string
+		if err := d.QueryRow("SELECT value FROM settings_kv WHERE key='dashboard_password_hash'").Scan(&existingHash); err == nil {
+			if body.Current == "" {
+				http.Error(w, `{"error":"current password required"}`, 400)
+				return
+			}
+			if !sha256Check(body.Current, existingHash) {
+				http.Error(w, `{"error":"incorrect password"}`, 401)
+				return
+			}
+		}
+		// Set new password
+		newHash := sha256Hash(body.New)
+		d.Exec("INSERT OR REPLACE INTO settings_kv (key, value) VALUES ('dashboard_password_hash', ?)", newHash)
+		d.Exec("INSERT OR REPLACE INTO settings_kv (key, value) VALUES ('dashboard_first_run', 'false')")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}
+}
+
+// ExportConfigHandler exports all dashboard config as JSON.
+func ExportConfigHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_ = r
+		type config struct {
+			Providers  []map[string]interface{} `json:"providers"`
+			Combos     []map[string]interface{} `json:"combos"`
+			ProxyPools []map[string]interface{} `json:"proxy_pools"`
+			APIKeys    []map[string]interface{} `json:"api_keys"`
+			Connections []map[string]interface{} `json:"connections"`
+		}
+		var c config
+		for _, q := range []struct {
+			table string
+			dst   *[]map[string]interface{}
+		}{
+			{"providers", &c.Providers},
+			{"combos", &c.Combos},
+			{"proxy_pools", &c.ProxyPools},
+			{"api_keys", &c.APIKeys},
+			{"accounts", &c.Connections},
+		} {
+			rows, err := d.Query("SELECT * FROM " + q.table)
+			if err != nil {
+				continue
+			}
+			cols, _ := rows.Columns()
+			for rows.Next() {
+				vals := make([]interface{}, len(cols))
+				addr := make([]interface{}, len(cols))
+				for i := range vals {
+					addr[i] = &vals[i]
+				}
+				if err := rows.Scan(addr...); err != nil {
+					continue
+				}
+				m := make(map[string]interface{})
+				for i, col := range cols {
+					m[col] = vals[i]
+				}
+				*q.dst = append(*q.dst, m)
+			}
+			rows.Close()
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"config": c})
+	}
+}
+
+// ImportConfigHandler imports dashboard config from JSON.
+func ImportConfigHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Providers   []map[string]interface{} `json:"providers"`
+			Combos      []map[string]interface{} `json:"combos"`
+			ProxyPools  []map[string]interface{} `json:"proxy_pools"`
+			APIKeys     []map[string]interface{} `json:"api_keys"`
+			Connections []map[string]interface{} `json:"connections"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, `{"error":"decode"}`, 400)
+			return
+		}
+		importTable := func(table string, items []map[string]interface{}) {
+			tx, _ := d.DB.Begin()
+			d.DB.Exec("DELETE FROM " + table)
+			for _, item := range items {
+				keys := make([]string, 0, len(item))
+				vals := make([]interface{}, 0, len(item))
+				for k, v := range item {
+					keys = append(keys, k)
+					vals = append(vals, v)
+				}
+				placeholders := make([]string, len(keys))
+				for i := range placeholders {
+					placeholders[i] = "?"
+				}
+				q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", table, strings.Join(keys, ","), strings.Join(placeholders, ","))
+				tx.Exec(q, vals...)
+			}
+			tx.Commit()
+		}
+		importTable("providers", body.Providers)
+		importTable("combos", body.Combos)
+		importTable("proxy_pools", body.ProxyPools)
+		importTable("api_keys", body.APIKeys)
+		importTable("accounts", body.Connections)
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}
+}
+
+func sha256Hash(pw string) string {
+	h := sha256.Sum256([]byte(pw))
+	return fmt.Sprintf("%x", h)
+}
+
+func sha256Check(pw, hash string) bool {
+	computed := sha256.Sum256([]byte(pw))
+	return fmt.Sprintf("%x", computed) == hash
 }
