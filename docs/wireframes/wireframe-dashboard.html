@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JKRouter — Dashboard Wireframes (PRD §5.1)</title>
+<style>
+:root{
+  --base:#1e1e2e; --mantle:#181825; --crust:#11111b; --s0:#313244; --s1:#45475a;
+  --blue:#89b4fa; --lav:#b4befe; --grn:#a6e3a1; --md:#cba6f7; --yel:#f9e2af;
+  --red:#f38ba8; --txt:#cdd6f4; --mut:#9399b2; --brd:#45475a;
+  font-size:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--crust);color:var(--txt);font-family:ui-monospace,'Cascadia Code','JetBrains Mono',monospace;line-height:1.5}
+h1{font-size:1.4rem;color:var(--blue)}
+h2{font-size:1.1rem;color:var(--lav);margin:0 0 .5rem}
+.page{background:var(--base);border:1px solid var(--brd);border-radius:10px;margin:2.5rem auto;max-width:1100px;overflow:hidden;box-shadow:0 8px 30px #0007}
+.page-head{background:var(--mantle);padding:1rem 1.2rem;border-bottom:1px solid var(--brd);display:flex;justify-content:space-between;align-items:baseline}
+.page-head small{color:var(--mut)}
+.page-body{padding:1.2rem}
+.tag{display:inline-block;font-size:.65rem;letter-spacing:.08em;text-transform:uppercase;padding:.15rem .5rem;border-radius:4px;margin-right:.5rem}
+.tag.p1{background:var(--grn);color:var(--crust)}
+.tag.p2{background:var(--mut);color:var(--crust)}
+.tag.new{background:var(--md);color:var(--crust)}
+/* shared layout: sidebar + main */
+.app{display:grid;grid-template-columns:190px 1fr;min-height:420px}
+.nav{background:var(--mantle);border-right:1px solid var(--brd);padding:1rem .6rem;display:flex;flex-direction:column;gap:.15rem}
+.nav .logo{font-weight:700;color:var(--blue);font-size:1rem;padding:0 .5rem .8rem;border-bottom:1px solid var(--brd);margin-bottom:.6rem}
+.nav a{display:block;color:var(--mut);text-decoration:none;padding:.4rem .5rem;border-radius:6px;font-size:.85rem}
+.nav a.on{background:var(--s0);color:var(--txt)}
+.nav .sec{font-size:.6rem;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;margin:.7rem 0 .2rem .5rem}
+.main{padding:1rem 1.2rem}
+/* components */
+.card{background:var(--s0);border:1px solid var(--brd);border-radius:8px;padding:.9rem;margin-bottom:.8rem}
+.card h3{font-size:.9rem;color:var(--lav);margin-bottom:.5rem;font-weight:600}
+.row{display:flex;gap:.8rem;flex-wrap:wrap}
+.chip{border:1px dashed var(--s1);border-radius:6px;padding:.35rem .6rem;font-size:.75rem;color:var(--mut)}
+.chip.fill{border-style:solid;background:var(--s1);color:var(--txt)}
+.btn{display:inline-block;padding:.35rem .7rem;border-radius:6px;font-size:.75rem;background:var(--blue);color:var(--crust);font-weight:600}
+.btn.ghost{background:transparent;border:1px solid var(--brd);color:var(--txt)}
+table{width:100%;border-collapse:collapse;font-size:.8rem}
+th{text-align:left;color:var(--mut);font-weight:400;border-bottom:1px solid var(--brd);padding:.4rem .3rem;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em}
+td{padding:.45rem .3rem;border-bottom:1px solid #31324480}
+.st{display:inline-block;font-size:.68rem;padding:.1rem .45rem;border-radius:99px}
+.st.active{background:#a6e3a133;color:var(--grn);border:1px solid var(--grn)}
+.st.cooling{background:#f9e2af33;color:var(--yel);border:1px solid var(--yel)}
+.st.disabled{background:#f38ba833;color:var(--red);border:1px solid var(--red)}
+.st.ok{background:#a6e3a133;color:var(--grn)}
+.st.err{background:#f38ba833;color:var(--red)}
+.note{font-size:.7rem;color:var(--mut);margin-top:.4rem}
+.kv{display:grid;grid-template-columns:140px 1fr;gap:.25rem .8rem;font-size:.8rem}
+.kv dt{color:var(--mut)}
+.kv dd{color:var(--txt)}
+.bar{height:6px;background:var(--s1);border-radius:99px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--blue);width:62%}
+.search{border:1px solid var(--brd);border-radius:6px;padding:.35rem .6rem;font-size:.8rem;color:var(--mut);background:var(--crust)}
+.tabs{display:flex;gap:1rem;border-bottom:1px solid var(--brd);margin-bottom:.8rem;font-size:.8rem}
+.tabs span{color:var(--mut);padding:.3rem 0}
+.tabs span.on{color:var(--blue);border-bottom:2px solid var(--blue)}
+pre{background:var(--crust);border:1px solid var(--brd);border-radius:6px;padding:.6rem;font-size:.75rem;overflow:auto;color:var(--yel)}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:.8rem}
+.stat .n{font-size:1.5rem;color:var(--blue);font-weight:700}
+.stat .l{font-size:.65rem;color:var(--mut);text-transform:uppercase;letter-spacing:.08em}
+.legend{max-width:1100px;margin:0 auto 2rem;padding:0 1rem}
+</style>
+</head>
+<body>
+
+<header class="legend" style="padding-top:2rem">
+  <h1>JKRouter — Dashboard Wireframes</h1>
+  <p style="color:var(--mut);margin-top:.4rem">
+   Referensi visual untuk PRD §5.1 (halaman P1) + §4.1 (state akun). Bukan final design — layout & struktur, bukan pixel-perfect.
+    Palet: <b style="color:var(--grn)">P1</b> (MVP), <b style="color:var(--md)">P2</b>. Setiap halaman = satu kotak <code>.page</code> dengan sidebar navigasi yang sama.
+  </p>
+</header>
+
+<!-- ============ SIDEBAR TEMPLATE (repeat pattern) ============ -->
+<!--
+TEMPLATE NAV (dipakai semua halaman .page):
+<nav class="nav">
+  <div class="logo">jkROUTER</div>
+  <div class="sec">Routing</div>
+  <a href="#">Providers</a><a>Combos</a><a>Endpoint</a>
+  <div class="sec">Infrastructure</div>
+  <a>Proxy Pools</a><a>Usage & Logs</a>
+  <div class="sec">System</div>
+  <a>API Keys</a><a>Settings</a><a>Profile</a>
+</nav>
+-->
+
+<!-- ================= 1. PROVIDERS ================= -->
+<section class="page">
+  <div class="page-head"><h2><span class="tag p1">P1</span> /dashboard/providers</h2><small>CRUD provider + connections (akun) + bind proxy pool — mirip ConnectionsCard.js 9Router</small></div>
+  <div class="app">
+    <nav class="nav"><div class="logo">jkROUTER</div>
+      <div class="sec">Routing</div><a class="on">Providers</a><a>Combos</a><a>Endpoint</a>
+      <div class="sec">Infrastructure</div><a>Proxy Pools</a><a>Usage &amp; Logs</a>
+      <div class="sec">System</div><a>API Keys</a><a>Settings</a><a>Profile</a>
+    </nav>
+    <div class="main">
+      <div class="row" style="justify-content:space-between;margin-bottom:.8rem">
+        <input class="search" style="flex:1" placeholder="Cari provider…">
+        <button class="btn">+ Add API Key</button><button class="btn ghost">+ Connect OAuth</button>
+      </div>
+      <div class="card">
+        <h3>OpenRouter <span class="st active">3 akun</span></h3>
+        <table>
+          <tr><th>Name</th><th>Type</th><th>Proxy Pool</th><th>Priority</th><th>State</th><th></th></tr>
+          <tr><td>work-mail</td><td>API key</td><td class="chip">fast-us-1</td><td>1</td><td><span class="st active">active</span></td><td class="chip">▸</td></tr>
+          <tr><td>personal</td><td>API key</td><td>—</td><td>2</td><td><span class="st cooling">cooling_down · 42s</span></td><td class="chip">▸</td></tr>
+          <tr><td>kiro-free</td><td>OAuth</td><td>—</td><td>3</td><td><span class="st disabled">disabled · 401</span></td><td class="chip">🔑</td></tr>
+        </table>
+        <p class="note">State sesuai §4.1: active / cooling_down (429 + Retry-After) / disabled (401/403, re-auth manual). Drag priority (dnd-kit di 9Router → sortable list di Nuxt).</p>
+      </div>
+      <div class="card">
+        <h3>Gemini <span class="st active">OAuth · refresh otomatis</span></h3>
+        <div class="kv"><dt>Token</dt><dd>●●●● 3f (refresh in 2d 4h)</dd><dt>Quota</dt><dd><span class="bar" style="width:220px;display:inline-block"><i></i></span> 62%</dd><dt>Models</dt><td>gemini-2.5-pro, flash…</td></div>
+      </div>
+      <p class="note"><span class="tag p2">P2</span> kartu per-tool auto-configure CLI (hal. cli-tools 9Router) nempel di bawah tiap provider.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 2. PROXY POOLS ================= -->
+<section class="page">
+  <div class="page-head"><h2><span class="tag p1">P1</span> /dashboard/proxy-pools</h2><small>CRUD pool + health-test + binding (per akun, bukan global)</small></div>
+  <div class="app">
+    <nav class="nav"><div class="logo">jkROUTER</div>
+      <div class="sec">Routing</div><a>Providers</a><a>Combos</a><a>Endpoint</a>
+      <div class="sec">Infrastructure</div><a class="on">Proxy Pools</a><a>Usage &amp; Logs</a>
+      <div class="sec">System</div><a>API Keys</a><a>Settings</a><a>Profile</a>
+    </nav>
+    <div class="main">
+      <div class="row" style="justify-content:flex-end;margin-bottom:.8rem"><button class="btn">+ New Pool</button></div>
+      <div class="grid3">
+        <div class="card"><h3>fast-us-1 <span class="st ok">active · 24ms</span></h3>
+          <div class="kv"><dt>Type</dt><dd>http</dd><dt>URL</dt><dd>http://res1.luminati.us:22696</dd><dt>noProxy</dt><dd>localhost,10.0.0.0/8</dd><dt>strictProxy</dt><dd>✓</dd><dt>Bound</dt><dd>2 akun</dd></div>
+          <button class="btn ghost" style="margin-top:.5rem">Test</button><span class="note">last test 4m ago</span>
+        </div>
+        <div class="card"><h3>socks-eu <span class="st err">error · timeout</span></h3>
+          <div class="kv"><dt>Type</dt><dd>socks5</dd><dt>URL</dt><dd>socks5://eu1.vpn.net:1080</dd><dt>Bound</dt><dd>0 akun</dd></div>
+          <p class="note">auto-deactivate saat test gagal (§4.1)</p>
+        </div>
+        <div class="card"><h3>cf-relay <span class="st ok">active</span></h3>
+          <div class="kv"><dt>Type</dt><dd>relay (vercel)</dd><dt>URL</dt><dd>https://jkr-relay-abc.vercel.app</dd></div>
+          <p class="note"><span class="tag p2">P2</span> tombol Deploy Worker (vercel/cloudflare/deno) di sini.</p>
+        </div>
+      </div>
+      <p class="note">Modal "New Pool": name, type (http|socks5|relay), URL, noProxy (bypass list), strictProxy toggle. Binding dilakukan dari halaman Providers (dropdown di modal Add API Key).</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 3. COMBOS ================= -->
+<section class="page">
+  <div class="page-head"><h2><span class="tag p1">P1</span> /dashboard/combos</h2><small>Model-combo fallback chain: urut provider/model yang dicoba saat gagal</small></div>
+  <div class="app">
+    <nav class="nav"><div class="logo">jkROUTER</div>
+      <div class="sec">Routing</div><a>Providers</a><a class="on">Combos</a><a>Endpoint</a>
+      <div class="sec">Infrastructure</div><a>Proxy Pools</a><a>Usage &amp; Logs</a>
+      <div class="sec">System</div><a>API Keys</a><a>Settings</a><a>Profile</a>
+    </nav>
+    <div class="main">
+      <div class="row" style="justify-content:space-between;margin-bottom:.8rem"><input class="search" style="flex:1" placeholder="Cari combo…"><button class="btn">+ New Combo</button></div>
+      <div class="card"><h3>kr/claude-sonnet-4.5 <span class="st active">3 langkah</span></h3>
+        <ol style="font-size:.8rem;padding-left:1.2rem">
+          <li>anthropic/claude-sonnet-4.5 <span class="st active">akun: work-mail</span></li>
+          <li>kiro/claude-sonnet-4.5 <span class="st cooling">cooling 22s</span></li>
+          <li>openrouter/anthropic/claude-sonnet-4.5 <span class="st ok">fallback akhir</span></li>
+        </ol>
+      </div>
+      <div class="card"><h3>kr/gemini-2.5-flash-lite</h3>
+        <ol style="font-size:.8rem;padding-left:1.2rem"><li>gemini/flash-lite (akun personal)</li><li>openrouter/google/gemini-2.5-flash-lite</li></ol>
+      </div>
+      <div class="card" style="border-color:var(--md)"><h3 style="color:var(--md)">Capability-aware routing (§4.2)</h3>
+        <p style="font-size:.8rem;margin-bottom:.5rem">Combo <code>kr/claude-sonnet-4.5</code> tidak punya model vision → otomatis pakai adapter. Badge per anggota:</p>
+        <ol style="font-size:.8rem;padding-left:1.2rem">
+          <li>openrouter/mimo-v2.5-free <span class="st active">vision ✓</span> <span class="chip">capacity adapter</span></li>
+          <li>anthropic/claude-sonnet-4.5 <span class="st disabled">vision ✗</span></li>
+          <li>openrouter/anthropic/claude-sonnet-4.5 <span class="st active">vision ✓</span></li>
+        </ol>
+        <p class="note">Ketika request membawa gambar: model vision-capable otomatis difloat ke depan; jika tidak ada → pool adapter di-prepend. Log usage tetap menunjukkan adapter dipergunakan (transparan, tidak mengklaim sebagai anggota combo user).</p>
+      </div>
+      <div class="card"><h3>Refresh models (per provider, §4.2)</h3>
+        <div class="row">
+          <span class="chip">deepseek · validateUrl: /models · <span style="color:var(--grn)">sync 2h ago</span></span>
+          <span class="chip">gemini · validateUrl: /models · <span style="color:var(--grn)">sync 2h ago</span></span>
+          <span class="chip">klr · tidak ada /models · <span style="color:var(--mut)">manual only</span></span>
+        </div>
+        <button class="btn ghost" style="margin-top:.5rem">Refresh all</button>
+        <p class="note">Katalog dasar = field <code>models</code> di registry file (manual, developer). Auto-refresh dari <code>validateUrl</code> memperkaya katalog + menyimpan capability per model; model yang hilang upstream tidak dihapus otomatis (bisa di-pin manual).</p>
+      </div>
+      <p class="note"><span class="tag p2">P2</span> Graph view node (provider-nodes 9Router, @xyflow/react → alternatif ringan di Nuxt: svelte-flow/vue-flow, atau tunda).</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 4. ENDPOINT ================= -->
+<section class="page">
+  <div class="page-head"><h2><span class="tag p1">P1</span> /dashboard/endpoint</h2><small>Info copy-paste untuk AI CLI tools — mirror halaman endpoint 9Router</small></div>
+  <div class="app">
+    <nav class="nav"><div class="logo">jkROUTER</div>
+      <div class="sec">Routing</div><a>Providers</a><a>Combos</a><a class="on">Endpoint</a>
+      <div class="sec">Infrastructure</div><a>Proxy Pools</a><a>Usage &amp; Logs</a>
+      <div class="sec">System</div><a>API Keys</a><a>Settings</a><a>Profile</a>
+    </nav>
+    <div class="main">
+      <div class="card">
+        <h3>OpenAI-compatible</h3>
+        <div class="kv"><dt>Base URL</dt><dd><code>http://localhost:20128/v1</code></dd><dt>API Key</dt><dd><code>jk_r3_••••••••d7</code> <button class="btn ghost">copy</button></dd></div>
+      </div>
+      <div class="row">
+        <div class="card" style="flex:1"><h3>Claude Code</h3><pre>ANTHROPIC_BASE_URL=\n  http://localhost:20128\nANTHROPIC_API_KEY=jk_r3_…
+ANTHROPIC_MODEL=kr/claude-sonnet-4.5</pre></div>
+        <div class="card" style="flex:1"><h3>Cursor / OpenClaw</h3><pre>{ "endpoint": "http://localhost:20128/v1",
+  "apiKey": "jk_r3_…d7",
+  "model": "kr/gemini-2.5-flash-lite" }</pre></div>
+        <div class="card" style="flex:1"><h3>curl smoke test</h3><pre>curl -s localhost:20128/v1/chat/completions \
+ -H "Authorization: Bearer jk_r3_…" \
+ -d '{"model":"kr/claude-sonnet-4.5","messages":[{"role":"user","content":"ping"}],"stream":true}'</pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 5. USAGE & LOGS ================= -->
+<section class="page">
+  <div class="page-head"><h2><span class="tag p1">P1</span> /dashboard/usage</h2><small>Per-request log (WAL + writer goroutine §4.1) + chart ringan (chart.js)</small></div>
+  <div class="app">
+    <nav class="nav"><div class="logo">jkROUTER</div>
+      <div class="sec">Routing</div><a>Providers</a><a>Combos</a><a>Endpoint</a>
+      <div class="sec">Infrastructure</div><a>Proxy Pools</a><a class="on">Usage &amp; Logs</a>
+      <div class="sec">System</div><a>API Keys</a><a>Settings</a><a>Profile</a>
+    </nav>
+    <div class="main">
+      <div class="tabs"><span class="on">Usage</span><span>Logs (live stream)</span><span>Quota <span class="tag p2">P2</span></span></div>
+      <div class="grid4">
+        <div class="card stat"><div class="n">12,847</div><div class="l">requests / 7d</div></div>
+        <div class="card stat"><div class="n">41.2M</div><div class="l">tokens in</div></div>
+        <div class="card stat"><div class="n">$3.11</div><div class="l">cost / 7d</div></div>
+        <div class="card stat"><div class="n">1.9s</div><div class="l">p95 latency</div></div>
+      </div>
+      <div class="card" style="margin-top:.8rem"><h3>Chart: tokens per hari, per provider</h3>
+        <div class="bar" style="height:80px"><i style="width:84%"></i></div>
+        <p class="note">chart.js bar/line. Filter: provider / model / hari / status. (recharts 3MB di 9Router → chart.js ~40kb gzip)</p>
+      </div>
+      <div class="card"><h3>Request detail (expand row)</h3>
+        <table>
+          <tr><th>time</th><th>client→model</th><th>upstream (provider/akun)</th><th>state</th><th>tok in/out</th><th>ms</th><th>status</th></tr>
+          <tr><td>13:02:11</td><td>kr/claude-sonnet-4.5</td><td>anthropic · work-mail</td><td><span class="st ok">ok</span></td><td>8.2k / 1.1k</td><td>1412</td><td>200</td></tr>
+          <tr><td>13:02:11</td><td>kr/claude-sonnet-4.5</td><td>kiro · free</td><td><span class="st err">429 → failover</span></td><td>—</td><td>380</td><td>503</td></tr>
+        </table>
+        <p class="note">Failover tercatat sebagai baris terpisah (§4.1) — log.txt mirror di ~/.jkrouter.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 6. API KEYS ================= -->
+<section class="page">
+  <div class="page-head"><h2><span class="tag p1">P1</span> /dashboard/keys</h2><small>API key lokal untuk client (bukan key upstream)</small></div>
+  <div class="app">
+    <nav class="nav"><div class="logo">jkROUTER</div>
+      <div class="sec">Routing</div><a>Providers</a><a>Combos</a><a>Endpoint</a>
+      <div class="sec">Infrastructure</div><a>Proxy Pools</a><a>Usage &amp; Logs</a>
+      <div class="sec">System</div><a class="on">API Keys</a><a>Settings</a><a>Profile</a>
+    </nav>
+    <div class="main">
+      <div class="row" style="justify-content:space-between;margin-bottom:.8rem"><span class="note">Client pakai key ini ke /v1 — bukan key provider upstream.</span><button class="btn">+ Generate</button></div>
+      <div class="card"><table>
+        <tr><th>Name</th><th>Key</th><th>Last used</th><th>Requests</th><th></th></tr>
+        <tr><td>claude-code-main</td><td><code>jk_r3_••••••••d7</code></td><td>2m ago</td><td>4,210</td><td><span class="chip">copy</span><span class="chip">revoke</span></td></tr>
+        <tr><td>cursor-test</td><td><code>jk_r3_••••••••a9</code></td><td>3d ago</td><td>88</td><td><span class="chip">copy</span><span class="chip">revoke</span></td></tr>
+      </table></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 7. SETTINGS ================= -->
+<section class="page">
+  <div class="page-head"><h2><span class="tag p1">P1</span> /dashboard/settings</h2><small>System config</small></div>
+  <div class="app">
+    <nav class="nav"><div class="logo">jkROUTER</div>
+      <div class="sec">Routing</div><a>Providers</a><a>Combos</a><a>Endpoint</a>
+      <div class="sec">Infrastructure</div><a>Proxy Pools</a><a>Usage &amp; Logs</a>
+      <div class="sec">System</div><a>API Keys</a><a class="on">Settings</a><a>Profile</a>
+    </nav>
+    <div class="main">
+      <div class="card"><h3>Server</h3>
+        <div class="kv"><dt>Port</dt><dd>20128 <span class="chip">1000–65535</span></dd><dt>Bind</dt><dd>127.0.0.1 (default) / 0.0.0.0 (wajib password §10.5)</dd><dt>DATA_DIR</dt><dd>~/.jkrouter</dd></div>
+      </div>
+      <div class="card"><h3>Backup &amp; Restore (§4.3)</h3>
+        <div class="kv"><dt>Auto snapshot</dt><dd>sebelum migrasi DB · retensi 10 · <span style="color:var(--grn)">latest: 2h ago</span></dd><dt>Restore</dt><dd>dropdown 10 snapshot + tombol <span class="chip">restore</span> (verifikasi SHA-256)</dd><dt>Export config</dt><dd>JSON portable (providers/combos/pools/keys) <button class="btn ghost">export</button> <button class="btn ghost">import</button></dd></div>
+        <p class="note">Upgrade di atas 9Router (yang hanya punya safety backup pre-migration tanpa jalur restore).</p>
+      </div>
+      <div class="card"><h3>Resilience defaults (§4.1)</h3>
+        <div class="kv"><dt>cooldown fallback 429</dt><dd>60s saat header Retry-After absen</dd><dt>WAL checkpoint interval</dt><dd>5m</dd><dt>log channel size</dt><dd>4096 (drop+counter saat full)</dd></div>
+      </div>
+      <div class="card"><h3>Capacity Adapter (§4.2) <span class="tag p1">P1</span></h3>
+        <div class="kv"><dt>vision</dt><dd>off · strategy: fallback · pool: (default: oc/mimo-v2.5-free)</dd>
+        <dt>pdf</dt><dd>off</dd><dt>audio input</dt><dd>off</dd><dt>video input</dt><dd>off</dd></div>
+        <p class="note">On saat combo user tidak punya model yang support modality itu, pool adapter di-prepend ke urutan coba (autoSwitch).</p>
+      </div>
+      <div class="card"><h3>RTK token saver <span class="tag p2">P2</span></h3>
+        <div class="kv"><dt>caveman</dt><dd>off</dd><dt>headroom</dt><dd>off</dd><dt>system-inject</dt><dd>on</dd></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 8. PROFILE / LOGIN ================= -->
+<section class="page">
+  <div class="page-head"><h2><span class="tag p1">P1</span> /login → /dashboard/profile</h2><small>Dashboard auth lokal (mirror src/app/login 9Router, bcrypt)</small></div>
+  <div class="app" style="grid-template-columns:190px 1fr">
+    <nav class="nav"><div class="logo">jkROUTER</div>
+      <div class="sec">Routing</div><a>Providers</a><a>Combos</a><a>Endpoint</a>
+      <div class="sec">Infrastructure</div><a>Proxy Pools</a><a>Usage &amp; Logs</a>
+      <div class="sec">System</div><a>API Keys</a><a>Settings</a><a class="on">Profile</a>
+    </nav>
+    <div class="main">
+      <div class="card" style="max-width:340px"><h3>Change password</h3>
+        <div class="kv"><dt>current</dt><dd>••••••••</dd><dt>new</dt><dd>••••••••</dd></div>
+        <button class="btn">Save</button>
+      </div>
+      <p class="note">Flow pertama kali: setup wizard 1 halaman (password + port) di tempat login, sebelum dashboard unlock. Default ON/OFF = keputusan terbuka §10.5.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ P2 PREVIEWS (sketsa ringan, 1 baris tiap halaman) ============ -->
+<section class="page" style="background:var(--mantle)">
+  <div class="page-head"><h2><span class="tag p2">P2</span> Halaman lanjutan (preview, detail menyusul)</h2><small>Konsisten dengan sidebar di atas; hanya garis besar tiap halaman.</small></div>
+  <div class="page-body grid3">
+    <div class="card"><h3>basic-chat</h3><p class="note">Chat playground sisi kiri: model combo picker + system prompt. Kanan: stream response + panel failover (menampilkan kandidat mana yang dipakai). Untuk uji routing tanpa CLI.</p></div>
+    <div class="card"><h3>token-saver (RTK)</h3><p class="note">Toggle caveman / ponytail / headroom / system-inject + preview diff sistem-prompt sebelum/sesudah injeksi + hitungan token saved per hari.</p></div>
+    <div class="card"><h3>quota</h3><p class="note">Per akun: bar kuota window reset (sprint/weekly/midnight), status aktif/cooling/disabled (§4.1), grafik pemakaian vs reset cycle.</p></div>
+    <div class="card"><h3>cli-tools</h3><p class="note">Kartu per tool (Claude Code, Codex, Cursor, Cline, OpenClaw, Copilot…): "Apply" menuliskan konfigurasi endpoint/key/model ke file config tool terkait — sama persis dengan pola cli-tools 9Router.</p></div>
+    <div class="card"><h3>media-providers</h3><p class="note">Sama layout Providers, tapi registry kategori audio/TTS/video (elevenlabs, cartesia, fish-audio, edge-tts). Endpoint /v1/* untuk tts/stt/image/video.</p></div>
+    <div class="card"><h3>translator</h3><p class="note">Debug UI: pilih source format → target provider, kirim sample payload, tampilkan JSON request/response ter-translate + diff lossy hop. Untuk menguji direct-route pair baru (§4.1).</p></div>
+    <div class="card"><h3>mitm</h3><p class="note">Toggle MITM capture (CA self-signed), tabel capture request/response per provider, export HAR. Untuk debug protokol provider baru.</p></div>
+    <div class="card"><h3>pxpipe</h3><p class="note"><b>Undecided (§10.4)</b> — wireframe ditunda sampai protokol dipahami; kemungkinan skip v1.</p></div>
+    <div class="card"><h3>skills</h3><p class="note"><b>Undecided (§10.4)</b> — wireframe ditunda sampai kebutuhan dikonfirmasi.</p></div>
+  </div>
+</section>
+
+</body>
+</html>

@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JKRouter Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .nav-item { @apply block px-3 py-2 rounded-md text-sm transition-colors; }
+    .nav-item:hover, .nav-item.active { @apply bg-gray-800 text-blue-400; }
+    .card { @apply bg-gray-900 rounded-lg p-4 border border-gray-800; }
+    .btn-primary { @apply bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium; }
+    .btn-secondary { @apply bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 py-2 rounded text-sm; }
+    .btn-danger { @apply bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs; }
+    .input { @apply bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm w-full; }
+    .badge { @apply bg-gray-800 text-gray-300 px-2 py-0.5 rounded text-xs; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+  <div id="app" class="flex min-h-screen">
+    <!-- Sidebar -->
+    <aside class="w-56 bg-gray-900 border-r border-gray-800 flex flex-col fixed h-full overflow-auto z-10">
+      <div class="p-4 border-b border-gray-800">
+        <h1 class="text-lg font-bold text-blue-400">JKRouter</h1>
+        <p class="text-xs text-gray-500 mt-1">AI Routing Gateway</p>
+      </div>
+      <nav class="flex-1 p-2 space-y-1">
+        <a href="#/" class="nav-item">Dashboard</a>
+        <a href="#/providers" class="nav-item">Providers</a>
+        <a href="#/connections" class="nav-item">Connections</a>
+        <a href="#/combos" class="nav-item">Combos</a>
+        <a href="#/proxy-pools" class="nav-item">Proxy Pools</a>
+        <a href="#/api-keys" class="nav-item">API Keys</a>
+        <a href="#/usage" class="nav-item">Usage</a>
+        <a href="#/settings" class="nav-item">Settings</a>
+      </nav>
+      <div class="p-3 border-t border-gray-800 text-xs text-gray-600">v0.3.0-alpha</div>
+    </aside>
+    <!-- Main -->
+    <main class="flex-1 ml-56 p-6 overflow-auto">
+      <div id="content"></div>
+    </main>
+  </div>
+<script>
+// Simple router
+const routes = {
+  '/': () => renderDashboard(),
+  '/providers': () => renderProviders(),
+  '/connections': () => renderConnections(),
+  '/combos': () => renderCombos(),
+  '/proxy-pools': () => renderProxyPools(),
+  '/api-keys': () => renderAPIKeys(),
+  '/usage': () => renderUsage(),
+  '/settings': () => renderSettings(),
+};
+
+function navigate(path) {
+  document.querySelectorAll('.nav-item').forEach(a => a.classList.remove('active'));
+  document.querySelector(`.nav-item[href="#${path}"]`)?.classList.add('active');
+  const content = document.getElementById('content');
+  content.innerHTML = routes[path]?.() || '<p>Not found</p>';
+}
+
+window.addEventListener('hashchange', () => navigate(location.hash.slice(1) || '/'));
+window.addEventListener('load', () => navigate(location.hash.slice(1) || '/'));
+
+async function api(path, opts={}) {
+  const r = await fetch(`/api/dashboard${path}`, opts);
+  return r.json();
+}
+
+function btn(primary, label) {
+  return `<button class="${primary?'btn-primary':'btn-secondary'}" ${label}></button>`;
+}
+
+// --- Pages ---
+function renderDashboard() {
+  return `
+    <h2 class="text-xl font-bold mb-4">Dashboard</h2>
+    <div id="stats" class="grid grid-cols-4 gap-4 mb-6">
+      <div class="card"><div class="stat-label">Total Requests</div><div class="stat-value" id="s-total">-</div></div>
+      <div class="card"><div class="stat-label">Success</div><div class="stat-value text-green-400" id="s-success">-</div></div>
+      <div class="card"><div class="stat-label">Errors</div><div class="stat-value text-red-400" id="s-errors">-</div></div>
+      <div class="card"><div class="stat-label">Est. Cost</div><div class="stat-value text-yellow-400" id="s-cost">-</div></div>
+    </div>
+    <div class="card">
+      <h3 class="font-semibold mb-3">Recent Requests</h3>
+      <table class="w-full text-sm">
+        <thead><tr class="text-gray-500 border-b border-gray-800">
+          <th class="text-left pb-2">Time</th><th class="text-left pb-2">Model</th>
+          <th class="text-left pb-2">Provider</th><th class="text-left pb-2">Status</th>
+          <th class="text-left pb-2">Latency</th><th class="text-right pb-2">Tokens</th>
+        </tr></thead>
+        <tbody id="recent-tbody"><tr><td colspan="6" class="py-4 text-center text-gray-600">Loading...</td></tr></tbody>
+      </table>
+    </div>
+    <script>
+      (async()=>{
+        const [u,c]=await Promise.all([api('/usage'),api('/usage/cost')]);
+        const usage=u.usage||[];
+        document.getElementById('s-total').textContent=usage.length;
+        document.getElementById('s-success').textContent=usage.filter(x=>x.status==='success').length;
+        document.getElementById('s-errors').textContent=usage.filter(x=>x.status==='error').length;
+        document.getElementById('s-cost').textContent='$'+(c.costs||[]).reduce((s,x)=>s+(x.cost_usd||0),0).toFixed(4);
+        const tbody=document.getElementById('recent-tbody');
+        tbody.innerHTML=(usage.slice(0,10)||[]).map(r=>`<tr class="border-b border-gray-800">
+          <td class="py-2 text-gray-400 text-xs">${r.ts?.slice(11,19)}</td>
+          <td class="py-2 font-mono text-xs">${r.model}</td>
+          <td class="py-2">${r.provider}</td>
+          <td class="py-2 ${r.status==='success'?'text-green-400':'text-red-400'}">${r.status}</td>
+          <td class="py-2">${r.latency_ms}ms</td>
+          <td class="py-2 text-right font-mono text-xs">${r.tok_in}+${r.tok_out}</td>
+        </tr>`).join('')||'<tr><td colspan="6" class="py-4 text-center text-gray-600">No data</td></tr>';
+      })();
+    </script>`;
+}
+
+function renderProviders() {
+  return `
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-xl font-bold">Providers</h2>
+      <button onclick="toggleForm('provider-form')" class="btn-primary">+ Add Provider</button>
+    </div>
+    <div id="provider-form" class="hidden card mb-4">
+      <h3 class="font-semibold mb-3">New Provider</h3>
+      <div class="grid grid-cols-3 gap-3 mb-3">
+        <input id="p-label" placeholder="Label" class="input" />
+        <input id="p-url" placeholder="Base URL" class="input" />
+        <select id="p-auth" class="input"><option>api_key</option><option>oauth</option></select>
+      </div>
+      <button onclick="createProvider()" class="btn-primary mr-2">Save</button>
+      <button onclick="toggleForm('provider-form')" class="btn-secondary">Cancel</button>
+    </div>
+    <div class="card">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-800 text-gray-400"><tr>
+          <th class="text-left p-3">Label</th><th class="text-left p-3">Auth</th><th class="text-left p-3">Base URL</th><th class="text-right p-3"></th>
+        </tr></thead>
+        <tbody id="providers-tbody"><tr><td colspan="4" class="p-6 text-center text-gray-600">Loading...</td></tr></tbody>
+      </table>
+    </div>
+    <script>
+      (async()=>{
+        const r=await api('/providers');
+        const tbody=document.getElementById('providers-tbody');
+        tbody.innerHTML=(r.providers||[]).map(p=>`<tr class="border-t border-gray-800">
+          <td class="p-3 font-medium">${p.label}</td><td class="p-3"><span class="badge">${p.auth_type}</span></td>
+          <td class="p-3 font-mono text-xs">${p.base_url}</td>
+          <td class="p-3 text-right"><button class="btn-danger">Delete</button></td>
+        </tr>`).join('')||'<tr><td colspan="4" class="p-6 text-center text-gray-600">No providers</td></tr>';
+      })();
+      async function createProvider(){
+        const label=document.getElementById('p-label').value;
+        const base_url=document.getElementById('p-url').value;
+        const auth_type=document.getElementById('p-auth').value;
+        if(!label||!base_url)return;
+        await api('/providers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label,base_url,auth_type})});
+        toggleForm('provider-form');
+        location.hash='/providers';
+      }
+    </script>`;
+}
+
+function renderConnections() {
+  return `
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-xl font-bold">Connections</h2>
+      <button onclick="toggleForm('conn-form')" class="btn-primary">+ Add Connection</button>
+    </div>
+    <div id="conn-form" class="hidden card mb-4">
+      <h3 class="font-semibold mb-3">New Connection</h3>
+      <div class="space-y-3">
+        <input id="c-provider" placeholder="Provider ID" class="input" />
+        <input id="c-name" placeholder="Connection name" class="input" />
+        <select id="c-auth" class="input"><option>api_key</option><option>oauth</option></select>
+        <input id="c-secret" placeholder="API key / secret" class="input" type="password" />
+      </div>
+      <button onclick="createConnection()" class="btn-primary mr-2 mt-3">Save</button>
+      <button onclick="toggleForm('conn-form')" class="btn-secondary mt-3">Cancel</button>
+    </div>
+    <div class="card">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-800 text-gray-400"><tr>
+          <th class="text-left p-3">Name</th><th class="text-left p-3">Provider</th><th class="text-left p-3">Auth</th><th class="text-center p-3">Status</th>
+        </tr></thead>
+        <tbody id="conn-tbody"><tr><td colspan="4" class="p-6 text-center text-gray-600">Loading...</td></tr></tbody>
+      </table>
+    </div>
+    <script>
+      (async()=>{
+        const r=await api('/connections');
+        const tbody=document.getElementById('conn-tbody');
+        tbody.innerHTML=(r.connections||[]).map(c=>`<tr class="border-t border-gray-800">
+          <td class="p-3 font-medium">${c.name}</td><td class="p-3 text-gray-400">${c.provider_id}</td>
+          <td class="p-3"><span class="badge">${c.auth_type}</span></td>
+          <td class="p-3 text-center">
+            <button onclick="toggleConn(${c.id})" class="${c.disabled?'btn-secondary':'btn-primary'} px-2 py-1 text-xs">
+              ${c.disabled?'Disabled':'Active'}
+            </button>
+          </td>
+        </tr>`).join('')||'<tr><td colspan="4" class="p-6 text-center text-gray-600">No connections</td></tr>';
+      })();
+      async function toggleConn(id){
+        await api(`/connections/${id}/toggle`,{method:'PATCH'});
+        location.hash='/connections';
+      }
+      async function createConnection(){
+        const provider_id=document.getElementById('c-provider').value;
+        const name=document.getElementById('c-name').value;
+        const auth_type=document.getElementById('c-auth').value;
+        const secret=document.getElementById('c-secret').value;
+        if(!provider_id||!name)return;
+        await api('/connections',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id,name,auth_type,secret})});
+        toggleForm('conn-form');
+        location.hash='/connections';
+      }
+    </script>`;
+}
+
+function renderCombos() {
+  return `
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-xl font-bold">Combos</h2>
+      <button onclick="toggleForm('combo-form')" class="btn-primary">+ New Combo</button>
+    </div>
+    <div id="combo-form" class="hidden card mb-4">
+      <h3 class="font-semibold mb-3">New Combo</h3>
+      <div class="space-y-3">
+        <input id="cb-name" placeholder="Combo name" class="input" />
+        <input id="cb-desc" placeholder="Description" class="input" />
+        <input id="cb-models" placeholder="Model IDs, comma-separated" class="input" />
+      </div>
+      <button onclick="createCombo()" class="btn-primary mr-2 mt-3">Save</button>
+      <button onclick="toggleForm('combo-form')" class="btn-secondary mt-3">Cancel</button>
+    </div>
+    <div class="card">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-800 text-gray-400"><tr>
+          <th class="text-left p-3">Name</th><th class="text-left p-3">Strategy</th><th class="text-left p-3">Models</th><th class="text-right p-3"></th>
+        </tr></thead>
+        <tbody id="combos-tbody"><tr><td colspan="4" class="p-6 text-center text-gray-600">Loading...</td></tr></tbody>
+      </table>
+    </div>
+    <script>
+      (async()=>{
+        const r=await api('/combos');
+        const tbody=document.getElementById('combos-tbody');
+        tbody.innerHTML=(r.combos||[]).map(c=>`<tr class="border-t border-gray-800">
+          <td class="p-3 font-medium">${c.name}</td><td class="p-3"><span class="badge">${c.strategy||'fallback'}</span></td>
+          <td class="p-3 font-mono text-xs">${c.model_ids?.replace(/[\[\]"]/g,'')}</td>
+          <td class="p-3 text-right"><button onclick="delCombo(${c.id})" class="btn-danger">Delete</button></td>
+        </tr>`).join('')||'<tr><td colspan="4" class="p-6 text-center text-gray-600">No combos</td></tr>';
+      })();
+      async function createCombo(){
+        const name=document.getElementById('cb-name').value;
+        const model_ids=(document.getElementById('cb-models').value||'').split(',').map(s=>s.trim()).filter(Boolean);
+        if(!name)return;
+        await api('/combos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,model_ids})});
+        toggleForm('combo-form');
+        location.hash='/combos';
+      }
+      async function delCombo(id){
+        await api(`//${id}`,{method:'DELETE'});
+        location.hash='/combos';
+      }
+    </script>`;
+}
+
+function renderProxyPools() {
+  return `
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-xl font-bold">Proxy Pools</h2>
+      <button onclick="toggleForm('pool-form')" class="btn-primary">+ New Pool</button>
+    </div>
+    <div id="pool-form" class="hidden card mb-4">
+      <h3 class="font-semibold mb-3">New Proxy Pool</h3>
+      <div class="space-y-3">
+        <input id="pp-label" placeholder="Pool name" class="input" />
+        <textarea id="pp-list" placeholder="Proxies (one per line)" class="input" rows="4"></textarea>
+      </div>
+      <button onclick="createPool()" class="btn-primary mr-2 mt-3">Save</button>
+      <button onclick="toggleForm('pool-form')" class="btn-secondary mt-3">Cancel</button>
+    </div>
+    <div class="card">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-800 text-gray-400"><tr>
+          <th class="text-left p-3">Label</th><th class="text-left p-3">Status</th><th class="text-left p-3">Proxies</th><th class="text-right p-3"></th>
+        </tr></thead>
+        <tbody id="pools-tbody"><tr><td colspan="4" class="p-6 text-center text-gray-600">Loading...</td></tr></tbody>
+      </table>
+    </div>
+    <script>
+      (async()=>{
+        const r=await api('/proxy-pools');
+        const tbody=document.getElementById('pools-tbody');
+        tbody.innerHTML=(r.proxy_pools||[]).map(p=>`<tr class="border-t border-gray-800">
+          <td class="p-3 font-medium">${p.label}</td>
+          <td class="p-3"><span class="${p.status==='healthy'?'text-green-400':p.status==='deactivated'?'text-red-400':'text-gray-400'}">${p.status||'idle'}</span></td>
+          <td class="p-3 font-mono text-xs max-w-xs truncate">${(p.proxy_list||'[]').replace(/[\[\]"\\]/g,'')}</td>
+          <td class="p-3 text-right"><button onclick="delPool(${p.id})" class="btn-danger">Delete</button></td>
+        </tr>`).join('')||'<tr><td colspan="4" class="p-6 text-center text-gray-600">No pools</td></tr>';
+      })();
+      async function createPool(){
+        const label=document.getElementById('pp-label').value;
+        const proxy_list=JSON.stringify(document.getElementById('pp-list').value.split('\\n').filter(Boolean));
+        if(!label)return;
+        await api('/proxy-pools',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label,proxy_list})});
+        toggleForm('pool-form');
+        location.hash='/proxy-pools';
+      }
+      async function delPool(id){
+        await api(`/proxy-pools/${id}`,{method:'DELETE'});
+        location.hash='/proxy-pools';
+      }
+    </script>`;
+}
+
+function renderAPIKeys() {
+  return `
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-xl font-bold">API Keys</h2>
+      <button onclick="createKey()" class="btn-primary">+ Generate Key</button>
+    </div>
+    <div id="new-key-box" class="hidden bg-yellow-900/30 border border-yellow-700 rounded-lg p-4 mb-4">
+      <p class="text-yellow-300 text-sm mb-2">Save this key — it won't be shown again:</p>
+      <code id="new-key-val" class="text-yellow-200 text-sm break-all"></code>
+    </div>
+    <div class="card">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-800 text-gray-400"><tr>
+          <th class="text-left p-3">Label</th><th class="text-left p-3">Key Hash</th><th class="text-left p-3">Status</th><th class="text-right p-3"></th>
+        </tr></thead>
+        <tbody id="keys-tbody"><tr><td colspan="4" class="p-6 text-center text-gray-600">Loading...</td></tr></tbody>
+      </table>
+    </div>
+    <script>
+      (async()=>{
+        const r=await api('/api-keys');
+        const tbody=document.getElementById('keys-tbody');
+        tbody.innerHTML=(r.keys||[]).map(k=>`<tr class="border-t border-gray-800">
+          <td class="p-3 font-medium">${k.label||'(no label)'}</td>
+          <td class="p-3 font-mono text-xs">${k.key_hash?.slice(0,16)}...</td>
+          <td class="p-3 ${k.revoked?'text-red-400':'text-green-400'}">${k.revoked?'Revoked':'Active'}</td>
+          <td class="p-3 text-right">
+            ${k.revoked?'':'<button onclick="revokeKey('+k.id+')" class="btn-danger">Revoke</button>'}
+          </td>
+        </tr>`).join('')||'<tr><td colspan="4" class="p-6 text-center text-gray-600">No keys</td></tr>';
+      })();
+      async function createKey(){
+        const r=await api('/api-keys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label:'user-'+Date.now()})});
+        document.getElementById('new-key-box').classList.remove('hidden');
+        document.getElementById('new-key-val').textContent=r.key||'generated';
+        location.hash='/api-keys';
+      }
+      async function revokeKey(id){
+        await api(`/api-keys/${id}/revoke`,{method:'POST'});
+        location.hash='/api-keys';
+      }
+    </script>`;
+}
+
+function renderUsage() {
+  return `
+    <h2 class="text-xl font-bold mb-4">Usage Log</h2>
+    <div class="card">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-800 text-gray-400"><tr>
+          <th class="text-left p-3">Time</th><th class="text-left p-3">Request</th><th class="text-left p-3">Model</th>
+          <th class="text-left p-3">Provider</th><th class="text-left p-3">Status</th><th class="text-right p-3">Latency</th><th class="text-right p-3">Tokens</th>
+        </tr></thead>
+        <tbody id="usage-tbody"><tr><td colspan="7" class="p-6 text-center text-gray-600">Loading...</td></tr></tbody>
+      </table>
+    </div>
+    <script>
+      (async()=>{
+        const r=await api('/usage');
+        const tbody=document.getElementById('usage-tbody');
+        tbody.innerHTML=(r.usage||[]).map(u=>`<tr class="border-t border-gray-800">
+          <td class="p-3 text-gray-400 text-xs">${u.ts?.slice(11,19)}</td>
+          <td class="p-3 font-mono text-xs">${u.request_id}</td>
+          <td class="p-3 font-mono text-xs">${u.model}</td>
+          <td class="p-3">${u.provider}</td>
+          <td class="p-3 ${u.status==='success'?'text-green-400':'text-red-400'}">${u.status}</td>
+          <td class="p-3 text-right">${u.latency_ms}ms</td>
+          <td class="p-3 text-right font-mono text-xs">${u.tok_in}+${u.tok_out}</td>
+        </tr>`).join('')||'<tr><td colspan="7" class="p-6 text-center text-gray-600">No usage data</td></tr>';
+      })();
+    </script>`;
+}
+
+function renderSettings() {
+  return `
+    <h2 class="text-xl font-bold mb-4">Settings</h2>
+    <div class="space-y-4">
+      <div class="card">
+        <h3 class="font-semibold mb-2">Server</h3>
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <div><span class="text-gray-500">Port:</span> <span class="font-mono">20128</span></div>
+          <div><span class="text-gray-500">Data Dir:</span> <span class="font-mono">~/.jkrouter</span></div>
+          <div><span class="text-gray-500">Version:</span> <span class="font-mono">0.3.0-alpha</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3 class="font-semibold mb-2">Backup & Restore</h3>
+        <div class="flex gap-3">
+          <button onclick="exportConfig()" class="btn-primary">Export Config</button>
+          <button onclick="importConfig()" class="btn-secondary">Import Config</button>
+        </div>
+      </div>
+    </div>
+    <script>
+      function exportConfig(){
+        fetch('/api/dashboard/health').then(r=>r.json()).then(d=>{
+          const blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});
+          const a=document.createElement('a');
+          a.href=URL.createObjectURL(blob);
+          a.download='jkrouter-config.json';
+          a.click();
+        });
+      }
+      function importConfig(){alert('Use: jkrouter restore config.json');}
+    </script>`;
+}
+</script>
+</html>

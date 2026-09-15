@@ -1,0 +1,59 @@
+# ─── Go ───────────────────────────────────────────────────────────────
+# Build artifacts
+/tmp/jkrouter
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+
+# Test coverage
+*.coverprofile
+*.out
+
+# ─── Node / Nuxt ──────────────────────────────────────────────────────
+web/node_modules/
+web/dist/
+web/.nuxt/
+web/.output/
+web/.cache/
+
+# Pnpm (use alongside package-lock.json)
+web/pnpm-lock.yaml
+
+# ─── Env & Secrets ────────────────────────────────────────────────────
+.env
+!.env.example
+
+# SQLite WAL / backup files in runtime data dirs
+jkrouter.db-wal
+jkrouter.db-shm
+jkrouter.db.backup*
+backups/
+
+# ─── Direnv ───────────────────────────────────────────────────────────
+.direnv/
+
+# ─── IDE ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── OS ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── Logs ─────────────────────────────────────────────────────────────
+*.log
+logs/
+*.log.*
+
+# ─── Temporary / scratch ──────────────────────────────────────────────
+*.tmp
+*.temp
+*.bak
+scratch/

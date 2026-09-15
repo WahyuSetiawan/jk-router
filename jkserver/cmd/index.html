@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>JKRouter — Dashboard</title>
+<style>
+:root {
+  --base:#1e1e2e; --mantle:#181825; --crust:#11111b; --s0:#313244; --s1:#45475a;
+  --blue:#89b4fa; --lav:#b4befe; --grn:#a6e3a1; --md:#cba6f7; --yel:#f9e2af;
+  --red:#f38ba8; --txt:#cdd6f4; --mut:#9399b2;
+  font-size:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--base);color:var(--txt);font-family:ui-monospace,'Cascadia Code','JetBrains Mono',monospace;font-size:.85rem;line-height:1.5}
+a{color:inherit;text-decoration:none}
+
+/* ── layout ── */
+.app{display:grid;grid-template-columns:190px 1fr;min-height:100vh}
+.nav{background:var(--mantle);border-right:1px solid var(--s1);padding:.8rem .5rem;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;width:190px;overflow-y:auto}
+.nav .logo{font-weight:700;color:var(--blue);font-size:1rem;padding:.3rem .5rem .6rem;border-bottom:1px solid var(--s1);margin-bottom:.5rem}
+.nav .sec{font-size:.6rem;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;margin:.6rem 0 .15rem .5rem}
+.nav a{display:block;color:var(--mut);padding:.35rem .5rem;border-radius:6px;font-size:.8rem;transition:background .15s,color .15s}
+.nav a:hover{background:var(--s0);color:var(--txt)}
+.nav a.on{background:var(--s0);color:var(--txt)}
+.main{padding:1.2rem 1.5rem;overflow-y:auto}
+
+/* ── components ── */
+.card{background:var(--s0);border:1px solid var(--s1);border-radius:8px;padding:.9rem;margin-bottom:.8rem}
+.card h3{font-size:.9rem;color:var(--lav);margin-bottom:.5rem;font-weight:600}
+.page-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:1rem}
+.page-head h2{font-size:1.1rem;color:var(--lav);font-weight:600}
+.page-head small{color:var(--mut);font-size:.75rem}
+.row{display:flex;gap:.6rem;flex-wrap:wrap}
+.flex-between{display:flex;justify-content:space-between;align-items:center;margin-bottom:.8rem}
+
+/* badges / status */
+.st{display:inline-block;font-size:.68rem;padding:.1rem .45rem;border-radius:99px;border:1px solid transparent}
+.st.active,.st.ok{background:#a6e3a122;color:var(--grn);border-color:var(--grn)}
+.st.cooling{background:#f9e2af22;color:var(--yel);border-color:var(--yel)}
+.st.disabled,.st.err{background:#f38ba822;color:var(--red);border-color:var(--red)}
+
+/* chips / tags */
+.chip{border:1px dashed var(--s1);border-radius:6px;padding:.2rem .5rem;font-size:.72rem;color:var(--mut);cursor:pointer;transition:all .15s}
+.chip:hover{border-style:solid;background:var(--s1);color:var(--txt)}
+.chip.fill{border-style:solid;background:var(--s1);color:var(--txt)}
+
+/* buttons */
+.btn{display:inline-block;padding:.3rem .7rem;border-radius:6px;font-size:.75rem;font-weight:600;cursor:pointer;border:none;transition:opacity .15s}
+.btn:hover{opacity:.85}
+.btn-primary{background:var(--blue);color:var(--crust)}
+.btn-ghost{background:transparent;border:1px solid var(--s1);color:var(--txt)}
+.btn-danger{background:transparent;border:1px solid var(--red);color:var(--red);padding:.2rem .5rem;font-size:.7rem;border-radius:5px;cursor:pointer}
+.btn-sm{padding:.2rem .5rem;font-size:.72rem}
+
+/* inputs */
+.input{border:1px solid var(--s1);border-radius:6px;padding:.3rem .6rem;font-size:.8rem;color:var(--txt);background:var(--crust);outline:none;font-family:inherit;width:100%}
+.input:focus{border-color:var(--blue)}
+.select{border:1px solid var(--s1);border-radius:6px;padding:.3rem .5rem;font-size:.8rem;color:var(--txt);background:var(--crust);font-family:inherit}
+
+/* table */
+table{width:100%;border-collapse:collapse;font-size:.8rem}
+th{text-align:left;color:var(--mut);font-weight:400;border-bottom:1px solid var(--s1);padding:.4rem .3rem;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em}
+td{padding:.4rem .3rem;border-bottom:1px solid #31324460;vertical-align:middle}
+tr:hover td{background:#ffffff06}
+
+/* notes / helper */
+.note{font-size:.7rem;color:var(--mut);margin-top:.4rem}
+.hidden{display:none!important}
+.kv{display:grid;grid-template-columns:130px 1fr;gap:.2rem .8rem;font-size:.8rem}
+.kv dt{color:var(--mut)}
+.kv dd{color:var(--txt);word-break:break-all}
+.bar{height:6px;background:var(--s1);border-radius:99px;overflow:hidden;display:inline-block;vertical-align:middle}
+.bar i{display:block;height:100%;background:var(--blue)}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:.8rem}
+.stat .n{font-size:1.5rem;color:var(--blue);font-weight:700}
+.stat .l{font-size:.65rem;color:var(--mut);text-transform:uppercase;letter-spacing:.08em}
+pre{background:var(--crust);border:1px solid var(--s1);border-radius:6px;padding:.6rem;font-size:.72rem;overflow:auto;color:var(--yel);white-space:pre-wrap;word-break:break-all}
+code{background:var(--s1);padding:.1rem .3rem;border-radius:4px;font-size:.75rem;color:var(--yel)}
+
+/* search */
+.search{border:1px solid var(--s1);border-radius:6px;padding:.3rem .6rem;font-size:.8rem;color:var(--mut);background:var(--crust);font-family:inherit}
+.search:focus{border-color:var(--blue);color:var(--txt);outline:none}
+
+/* tabs */
+.tabs{display:flex;gap:1rem;border-bottom:1px solid var(--s1);margin-bottom:.8rem;font-size:.8rem}
+.tabs span{color:var(--mut);padding:.3rem 0;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s}
+.tabs span:hover{color:var(--txt)}
+.tabs span.on{color:var(--blue);border-bottom-color:var(--blue)}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <!-- Sidebar -->
+  <nav class="nav">
+    <div class="logo">jkROUTER</div>
+    <div class="sec">Routing</div>
+    <a href="#/providers"    data-route="/providers">Providers</a>
+    <a href="#/connections"  data-route="/connections">Connections</a>
+    <a href="#/combos"       data-route="/combos">Combos</a>
+    <a href="#/endpoint"     data-route="/endpoint">Endpoint</a>
+    <div class="sec">Infrastructure</div>
+    <a href="#/proxy-pools"  data-route="/proxy-pools">Proxy Pools</a>
+    <a href="#/usage"        data-route="/usage">Usage &amp; Logs</a>
+    <div class="sec">System</div>
+    <a href="#/api-keys"     data-route="/api-keys">API Keys</a>
+    <a href="#/settings"     data-route="/settings">Settings</a>
+    <a href="#/profile"      data-route="/profile">Profile</a>
+    <div style="margin-top:auto;padding:.6rem .5rem;font-size:.65rem;color:var(--mut)" id="version-badge"></div>
+  </nav>
+
+  <!-- Main -->
+  <main class="main">
+    <div id="content"></div>
+  </main>
+</div>
+
+<script>
+// ── Router ──
+const routes = {
+  '/':            renderDashboard,
+  '/providers':   renderProviders,
+  '/connections': renderConnections,
+  '/combos':      renderCombos,
+  '/proxy-pools': renderProxyPools,
+  '/api-keys':    renderAPIKeys,
+  '/usage':       renderUsage,
+  '/settings':    renderSettings,
+  '/endpoint':    renderEndpoint,
+  '/profile':     renderProfile,
+};
+
+function navigate(path) {
+  path = path || '/';
+  document.querySelectorAll('.nav a').forEach(a => {
+    a.classList.toggle('on', a.dataset.route === path);
+  });
+  const el = document.getElementById('content');
+  el.innerHTML = (routes[path] ? routes[path]() : '<p class="note">Halaman tidak ditemukan.</p>');
+  // run inline scripts
+  el.querySelectorAll('script').forEach(s => {
+    const code = s.textContent || s.innerHTML;
+    if (code.trim()) { try { new Function(code)(); } catch(e) { console.error(e); } }
+  });
+}
+window.addEventListener('hashchange', () => navigate(location.hash.slice(1) || '/'));
+window.addEventListener('load',      () => navigate(location.hash.slice(1) || '/'));
+
+// ── Helpers ──
+async function api(path, opts={}) {
+  const r = await fetch(`/api/dashboard${path}`, opts);
+  return r.json();
+}
+function toggleForm(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('hidden');
+}
+function escapeHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ══════════════════════════════════════
+//  Pages
+// ══════════════════════════════════════
+
+function renderDashboard() {
+  return `
+    <div class="page-head">
+      <h2>Dashboard</h2>
+      <span class="note" id="conn-status"></span>
+    </div>
+    <div id="stats" class="grid4 mb-6">
+      <div class="card stat"><div class="n" id="s-total">-</div><div class="l">Requests / 7d</div></div>
+      <div class="card stat"><div class="n" id="s-success" style="color:var(--grn)">-</div><div class="l">Success</div></div>
+      <div class="card stat"><div class="n" id="s-errors" style="color:var(--red)">-</div><div class="l">Errors</div></div>
+      <div class="card stat"><div class="n" id="s-cost" style="color:var(--yel)">$0</div><div class="l">Est. Cost / 7d</div></div>
+    </div>
+    <div class="card">
+      <h3>Recent Requests</h3>
+      <table>
+        <thead><tr>
+          <th>Time</th><th>Request</th><th>Model</th><th>Provider</th>
+          <th>Status</th><th>Latency</th><th>Tokens</th>
+        </tr></thead>
+        <tbody id="recent-tbody"><tr><td colspan="7" class="note">Loading…</td></tr></tbody>
+      </table>
+    </div>`;
+}
+
+function renderProviders() {
+  return `
+    <div class="flex-between">
+      <h2 class="text-xl font-bold">Providers</h2>
+      <button class="btn btn-primary" onclick="toggleForm('provider-form')">+ Add Provider</button>
+    </div>
+    <div id="provider-form" class="hidden card mb-4">
+      <h3>New Provider</h3>
+      <div class="grid3 gap-3 mb-3">
+        <input id="p-label" placeholder="Label" class="input" />
+        <input id="p-url"  placeholder="Base URL" class="input" />
+        <select id="p-auth" class="select"><option value="api_key">api_key</option><option value="oauth">oauth</option></select>
+      </div>
+      <button onclick="createProvider()" class="btn btn-primary mr-2">Save</button>
+      <button onclick="toggleForm('provider-form')" class="btn btn-ghost">Cancel</button>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr>
+          <th>Label</th><th>Auth</th><th>Base URL</th><th></th>
+        </tr></thead>
+        <tbody id="providers-tbody"><tr><td colspan="4" class="note">Loading…</td></tr></tbody>
+      </table>
+    </div>`;
+}
+
+function renderConnections() {
+  return `
+    <div class="flex-between">
+      <h2>Connections</h2>
+      <button class="btn btn-primary" onclick="toggleForm('conn-form')">+ Add Connection</button>
+    </div>
+    <div id="conn-form" class="hidden card mb-4">
+      <h3>New Connection</h3>
+      <div class="space-y-3">
+        <input id="c-provider" placeholder="Provider ID" class="input" />
+        <input id="c-name"     placeholder="Connection name" class="input" />
+        <select id="c-auth" class="select"><option value="api_key">api_key</option><option value="oauth">oauth</option></select>
+        <input id="c-secret"   placeholder="API key / secret" class="input" type="password" />
+      </div>
+      <button onclick="createConnection()" class="btn btn-primary mr-2 mt-3">Save</button>
+      <button onclick="toggleForm('conn-form')" class="btn btn-ghost mt-3">Cancel</button>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr>
+          <th>Name</th><th>Provider</th><th>Auth</th><th class="text-center">Status</th>
+        </tr></thead>
+        <tbody id="conn-tbody"><tr><td colspan="4" class="note">Loading…</td></tr></tbody>
+      </table>
+    </div>`;
+}
+
+function renderCombos() {
+  return `
+    <div class="flex-between">
+      <h2>Combos</h2>
+      <button class="btn btn-primary" onclick="toggleForm('combo-form')">+ New Combo</button>
+    </div>
+    <div id="combo-form" class="hidden card mb-4">
+      <h3>New Combo</h3>
+      <div class="space-y-3">
+        <input id="cb-name"  placeholder="Combo name" class="input" />
+        <input id="cb-desc"  placeholder="Description" class="input" />
+        <input id="cb-models"placeholder="Model IDs, comma-separated" class="input" />
+      </div>
+      <button onclick="createCombo()" class="btn btn-primary mr-2 mt-3">Save</button>
+      <button onclick="toggleForm('combo-form')" class="btn btn-ghost mt-3">Cancel</button>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr>
+          <th>Name</th><th>Strategy</th><th>Models</th><th></th>
+        </tr></thead>
+        <tbody id="combos-tbody"><tr><td colspan="4" class="note">Loading…</td></tr></tbody>
+      </table>
+    </div>`;
+}
+
+function renderProxyPools() {
+  return `
+    <div class="flex-between">
+      <h2>Proxy Pools</h2>
+      <button class="btn btn-primary" onclick="toggleForm('pool-form')">+ New Pool</button>
+    </div>
+    <div id="pool-form" class="hidden card mb-4">
+      <h3>New Proxy Pool</h3>
+      <div class="space-y-3">
+        <input id="pp-label"   placeholder="Pool name" class="input" />
+        <textarea id="pp-list" placeholder="Proxies (one per line)" class="input" rows="4"></textarea>
+      </div>
+      <button onclick="createPool()" class="btn btn-primary mr-2 mt-3">Save</button>
+      <button onclick="toggleForm('pool-form')" class="btn btn-ghost mt-3">Cancel</button>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr>
+          <th>Label</th><th>Status</th><th>Proxies</th><th></th>
+        </tr></thead>
+        <tbody id="pools-tbody"><tr><td colspan="4" class="note">Loading…</td></tr></tbody>
+      </table>
+    </div>`;
+}
+
+function renderAPIKeys() {
+  return `
+    <div class="flex-between">
+      <h2>API Keys</h2>
+      <button class="btn btn-primary" onclick="createKey()">+ Generate Key</button>
+    </div>
+    <div id="new-key-box" class="hidden card mb-4" style="border-color:var(--yel)">
+      <p style="color:var(--yel);font-size:.8rem;margin-bottom:.4rem">Save this key — it won't be shown again:</p>
+      <code id="new-key-val" style="font-size:.8rem;word-break:break-all"></code>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr>
+          <th>Name</th><th>Key Hash</th><th>Status</th><th></th>
+        </tr></thead>
+        <tbody id="keys-tbody"><tr><td colspan="4" class="note">Loading…</td></tr></tbody>
+      </table>
+    </div>`;
+}
+
+function renderUsage() {
+  return `
+    <h2>Usage &amp; Logs</h2>
+    <div class="tabs" style="margin-top:.6rem">
+      <span class="on">Usage Log</span>
+      <span>Quota <span class="chip fill" style="font-size:.6rem">P2</span></span>
+    </div>
+    <div class="grid4 mb-4" id="usage-stats"></div>
+    <div class="card">
+      <table>
+        <thead><tr>
+          <th>Time</th><th>Request</th><th>Model</th><th>Provider</th>
+          <th>Status</th><th>Latency</th><th>Tokens</th>
+        </tr></thead>
+        <tbody id="usage-tbody"><tr><td colspan="7" class="note">Loading…</td></tr></tbody>
+      </table>
+    </div>`;
+}
+
+function renderSettings() {
+  return `
+    <h2>Settings</h2>
+    <div class="space-y-4" style="margin-top:.8rem">
+      <div class="card">
+        <h3>Server</h3>
+        <div class="kv">
+          <dt>Port</dt><dd><code id="set-port">—</code> <span class="chip fill">1000–65535</span></dd>
+          <dt>Bind</dt><dd>127.0.0.1 (default) / 0.0.0.0 (wajib password §10.5)</dd>
+          <dt>DATA_DIR</dt><dd><code id="set-dir">—</code></dd>
+          <dt>Version</dt><dd><code>v0.3.0-alpha</code></dd>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Backup &amp; Restore (§4.3)</h3>
+        <div class="kv">
+          <dt>Auto snapshot</dt><dd>sebelum migrasi DB · retensi 10 · <span style="color:var(--grn)">latest: --</span></dd>
+          <dt>Restore</dt><dd>dropdown 10 snapshot + tombol <span class="chip" onclick="alert('Pakai: jkrouter restore file.gz')">restore</span> (verifikasi SHA-256)</dd>
+          <dt>Export config</dt><dd>JSON portable (providers/combos/pools/keys)</dd>
+        </div>
+        <div class="row" style="margin-top:.5rem">
+          <button onclick="exportConfig()" class="btn btn-ghost btn-sm">Export JSON</button>
+          <label class="btn btn-ghost btn-sm" style="cursor:pointer">
+            Import JSON <input type="file" accept=".json" onchange="importConfig(event)" style="display:none" />
+          </label>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Resilience defaults (§4.1)</h3>
+        <div class="kv">
+          <dt>Cooldown fallback 429</dt><dd>60s saat header Retry-After absen</dd>
+          <dt>WAL checkpoint interval</dt><dd>5m</dd>
+          <dt>Log channel size</dt><dd>4096 (drop+counter saat full)</dd>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Capacity Adapter (§4.2)</h3>
+        <div class="kv">
+          <dt>vision</dt><dd>off · strategy: fallback · pool: (default: oc/mimo-v2.5-free)</dd>
+          <dt>pdf</dt><dd>off</dd>
+          <dt>audio input</dt><dd>off</dd>
+          <dt>video input</dt><dd>off</dd>
+        </div>
+        <p class="note">On saat combo user tidak punya model yang support modality itu, pool adapter di-prepend ke urutan coba (autoSwitch).</p>
+      </div>
+      <div class="card">
+        <h3>RTK Token Saver <span class="chip fill" style="font-size:.6rem">P2</span></h3>
+        <div class="kv">
+          <dt>caveman</dt><dd>off</dd>
+          <dt>headroom</dt><dd>off</dd>
+          <dt>system-inject</dt><dd>on</dd>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderEndpoint() {
+  return `
+    <h2>Endpoint</h2>
+    <div style="margin-top:.8rem">
+      <div class="card">
+        <h3>OpenAI-compatible</h3>
+        <div class="kv">
+          <dt>Base URL</dt><dd><code id="ep-base">http://localhost:20128/v1</code></dd>
+          <dt>API Key</dt><dd><code id="ep-key">—</code> <span class="chip" onclick="copyKey()">copy</span></dd>
+        </div>
+      </div>
+      <div class="row">
+        <div class="card" style="flex:1">
+          <h3>Claude Code</h3>
+          <pre id="ep-claude">ANTHROPIC_BASE_URL=http://localhost:20128
+ANTHROPIC_API_KEY=jk_r3_••••••••
+ANTHROPIC_MODEL=kr/claude-sonnet-4.5</pre>
+        </div>
+        <div class="card" style="flex:1">
+          <h3>Cursor / OpenClaw</h3>
+          <pre id="ep-cursor">{ "endpoint": "http://localhost:20128/v1",
+  "apiKey": "jk_r3_••••••••",
+  "model": "kr/gemini-2.5-flash-lite" }</pre>
+        </div>
+        <div class="card" style="flex:1">
+          <h3>curl smoke test</h3>
+          <pre>curl -s localhost:20128/v1/chat/completions \
+ -H "Authorization: Bearer jk_r3_…" \
+ -d '{"model":"kr/claude-sonnet-4.5",
+      "messages":[{"role":"user","content":"ping"}],
+      "stream":true}'</pre>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderProfile() {
+  return `
+    <h2>Profile</h2>
+    <div style="margin-top:.8rem">
+      <div class="card" style="max-width:400px">
+        <h3>Change password</h3>
+        <div class="space-y-3" style="margin-top:.5rem">
+          <input id="prof-cur" placeholder="Current password" class="input" type="password" />
+          <input id="prof-new" placeholder="New password"      class="input" type="password" />
+          <input id="prof-conf" placeholder="Confirm new"     class="input" type="password" />
+        </div>
+        <button onclick="changePassword()" class="btn btn-primary mt-3">Save</button>
+      </div>
+      <p class="note" style="margin-top:.6rem">Flow pertama kali: setup wizard 1 halaman (password + port) di tempat login, sebelum dashboard unlock. Default ON/OFF = keputusan terbuka §10.5.</p>
+    </div>`;
+}
+
+// ══════════════════════════════════════
+//  Data loaders (inline <script> blocks)
+// ══════════════════════════════════════
+
+// ── Dashboard stats ──
+(function(){
+  const el = document.getElementById('stats');
+  if(!el) return;
+  (async()=>{
+    const [u,c]=await Promise.all([api('/usage'), api('/usage/cost')]);
+    const usage=u.usage||[];
+    const total=usage.length;
+    const success=usage.filter(x=>x.status==='success').length;
+    const errors=total-success;
+    const cost=(c.costs||[]).reduce((s,x)=>s+(x.cost_usd||0),0).toFixed(4);
+    document.getElementById('s-total').textContent=total.toLocaleString();
+    document.getElementById('s-success').textContent=success.toLocaleString();
+    document.getElementById('s-errors').textContent=errors.toLocaleString();
+    document.getElementById('s-cost').textContent='$'+cost;
+    const tbody=document.getElementById('recent-tbody');
+    if(!tbody) return;
+    tbody.innerHTML=(usage.slice(0,15)||[]).map(r=>`<tr>
+      <td class="note">${(r.ts||'').slice(11,19)}</td>
+      <td class="font-mono text-xs">${escapeHtml(r.request_id||'—')}</td>
+      <td class="font-mono text-xs">${escapeHtml(r.model||'—')}</td>
+      <td>${escapeHtml(r.provider||'—')}</td>
+      <td><span class="st ${r.status==='success'?'ok':'err'}">${escapeHtml(r.status||'?')}</span></td>
+      <td>${r.latency_ms}ms</td>
+      <td class="font-mono text-xs">${r.tok_in}+${r.tok_out}</td>
+    </tr>`).join('')||'<tr><td colspan="7" class="note">No data</td></tr>';
+  })();
+})();
+
+// ── Providers ──
+(function(){
+  const tbody=document.getElementById('providers-tbody');
+  if(!tbody) return;
+  (async()=>{
+    const r=await api('/providers');
+    const list=r.providers||[];
+    tbody.innerHTML=list.map(p=>`<tr>
+      <td class="font-medium">${escapeHtml(p.label)}</td>
+      <td><span class="chip fill">${escapeHtml(p.auth_type)}</span></td>
+      <td class="font-mono text-xs">${escapeHtml(p.base_url)}</td>
+      <td><button class="btn-danger" onclick="deleteProvider(${p.id})">Delete</button></td>
+    </tr>`).join('')||'<tr><td colspan="4" class="note">No providers</td></tr>';
+  })();
+  window.createProvider=async function(){
+    const label=document.getElementById('p-label').value.trim();
+    const base_url=document.getElementById('p-url').value.trim();
+    const auth_type=document.getElementById('p-auth').value;
+    if(!label||!base_url)return alert('Label dan Base URL wajib diisi');
+    await api('/providers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label,base_url,auth_type})});
+    toggleForm('provider-form');
+    location.hash='/providers';
+  };
+  window.deleteProvider=async function(id){
+    if(!confirm('Hapus provider ini?'))return;
+    await api(`/providers/${id}`,{method:'DELETE'});
+    location.hash='/providers';
+  };
+})();
+
+// ── Connections ──
+(function(){
+  const tbody=document.getElementById('conn-tbody');
+  if(!tbody) return;
+  (async()=>{
+    const r=await api('/connections');
+    const list=r.connections||[];
+    tbody.innerHTML=list.map(c=>`<tr>
+      <td class="font-medium">${escapeHtml(c.name)}</td>
+      <td class="note">${escapeHtml(c.provider_id)}</td>
+      <td><span class="chip fill">${escapeHtml(c.auth_type)}</span></td>
+      <td class="text-center">
+        <button onclick="toggleConn(${c.id})" class="btn btn-sm ${c.disabled?'btn-danger':'btn-primary'}">
+          ${c.disabled?'Disabled':'Active'}
+        </button>
+      </td>
+    </tr>`).join('')||'<tr><td colspan="4" class="note">No connections</td></tr>';
+  })();
+  window.createConnection=async function(){
+    const provider_id=document.getElementById('c-provider').value.trim();
+    const name=document.getElementById('c-name').value.trim();
+    const auth_type=document.getElementById('c-auth').value;
+    const secret=document.getElementById('c-secret').value;
+    if(!provider_id||!name)return alert('Provider ID dan Name wajib diisi');
+    await api('/connections',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id,name,auth_type,secret})});
+    toggleForm('conn-form');
+    location.hash='/connections';
+  };
+  window.toggleConn=async function(id){
+    await api(`/connections/${id}/toggle`,{method:'PATCH'});
+    location.hash='/connections';
+  };
+})();
+
+// ── Combos ──
+(function(){
+  const tbody=document.getElementById('combos-tbody');
+  if(!tbody) return;
+  (async()=>{
+    const r=await api('/combos');
+    const list=r.combos||[];
+    tbody.innerHTML=list.map(c=>{
+      const models=(c.model_ids||'').replace(/[\[\]"\\]/g,'').split(',').map(s=>s.trim()).filter(Boolean);
+      return `<tr>
+        <td class="font-medium">${escapeHtml(c.name)}</td>
+        <td><span class="chip fill">${escapeHtml(c.strategy||'fallback')}</span></td>
+        <td class="font-mono text-xs">${models.map(m=>`<span class="chip" style="margin:.1rem">${escapeHtml(m)}</span>`).join('')}</td>
+        <td><button class="btn-danger" onclick="deleteCombo(${c.id})">Delete</button></td>
+      </tr>`;
+    }).join('')||'<tr><td colspan="4" class="note">No combos</td></tr>';
+  })();
+  window.createCombo=async function(){
+    const name=document.getElementById('cb-name').value.trim();
+    const description=document.getElementById('cb-desc').value.trim();
+    const model_ids=(document.getElementById('cb-models').value||'').split(',').map(s=>s.trim()).filter(Boolean);
+    if(!name)return alert('Nama combo wajib diisi');
+    await api('/combos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,description,model_ids,strategy:'fallback'})});
+    toggleForm('combo-form');
+    location.hash='/combos';
+  };
+  window.deleteCombo=async function(id){
+    if(!confirm('Hapus combo ini?'))return;
+    await api(`/combos/${id}`,{method:'DELETE'});
+    location.hash='/combos';
+  };
+})();
+
+// ── Proxy Pools ──
+(function(){
+  const tbody=document.getElementById('pools-tbody');
+  if(!tbody) return;
+  (async(()=>{
+    const r=await api('/proxy-pools');
+    const list=r.proxy_pools||[];
+    tbody.innerHTML=list.map(p=>{
+      const listArr=JSON.parse(p.proxy_list||'[]');
+      const statusClass=p.status==='healthy'?'ok':p.status==='deactivated'?'err':'';
+      return `<tr>
+        <td class="font-medium">${escapeHtml(p.label)}</td>
+        <td><span class="st ${statusClass}">${escapeHtml(p.status||'idle')}</span></td>
+        <td class="font-mono text-xs">${listArr.map(s=>`<span class="chip" style="margin:.1rem">${escapeHtml(s)}</span>`).join('')}</td>
+        <td><button class="btn-danger" onclick="deletePool(${p.id})">Delete</button></td>
+      </tr>`;
+    }).join('')||'<tr><td colspan="4" class="note">No pools</td></tr>';
+  })());
+  window.createPool=async function(){
+    const label=document.getElementById('pp-label').value.trim();
+    const proxy_list=JSON.stringify(document.getElementById('pp-list').value.split('\n').filter(Boolean));
+    if(!label)return alert('Pool name wajib diisi');
+    await api('/proxy-pools',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label,proxy_list})});
+    toggleForm('pool-form');
+    location.hash='/proxy-pools';
+  };
+  window.deletePool=async function(id){
+    if(!confirm('Hapus pool ini?'))return;
+    await api(`/proxy-pools/${id}`,{method:'DELETE'});
+    location.hash='/proxy-pools';
+  };
+})();
+
+// ── API Keys ──
+(function(){
+  const tbody=document.getElementById('keys-tbody');
+  if(!tbody) return;
+  (async(()=>{
+    const r=await api('/api-keys');
+    const list=r.keys||[];
+    tbody.innerHTML=list.map(k=>`<tr>
+      <td class="font-medium">${escapeHtml(k.label||'(no label)')}</td>
+      <td class="font-mono text-xs">${escapeHtml((k.key_hash||'').slice(0,16))}…</td>
+      <td class="${k.revoked?'text-red-400':'text-green-400'}">${k.revoked?'Revoked':'Active'}</td>
+      <td>${k.revoked?'':'<button class="btn-danger" onclick="revokeKey('+k.id+')">Revoke</button>'}</td>
+    </tr>`).join('')||'<tr><td colspan="4" class="note">No keys</td></tr>';
+  })());
+  window.createKey=async function(){
+    const r=await api('/api-keys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label:'user-'+Date.now()})});
+    document.getElementById('new-key-box').classList.remove('hidden');
+    document.getElementById('new-key-val').textContent=r.key||'generated';
+    location.hash='/api-keys';
+  };
+  window.revokeKey=async function(id){
+    if(!confirm('Revoke key ini?'))return;
+    await api(`/api-keys/${id}/revoke`,{method:'POST'});
+    location.hash='/api-keys';
+  };
+})();
+
+// ── Usage ──
+(function(){
+  const statsEl=document.getElementById('usage-stats');
+  const tbody=document.getElementById('usage-tbody');
+  if(!tbody) return;
+  (async(()=>{
+    const [u,c]=await Promise.all([api('/usage'), api('/usage/cost')]);
+    const usage=u.usage||[];
+    const total=usage.length;
+    const success=usage.filter(x=>x.status==='success').length;
+    const errors=total-success;
+    const cost=(c.costs||[]).reduce((s,x)=>s+(x.cost_usd||0),0).toFixed(4);
+    if(statsEl){
+      statsEl.innerHTML=`
+        <div class="card stat"><div class="n">${total}</div><div class="l">Requests / 7d</div></div>
+        <div class="card stat"><div class="n" style="color:var(--grn)">${success}</div><div class="l">Success</div></div>
+        <div class="card stat"><div class="n" style="color:var(--red)">${errors}</div><div class="l">Errors</div></div>
+        <div class="card stat"><div class="n" style="color:var(--yel)">$${cost}</div><div class="l">Est. Cost</div></div>`;
+    }
+    tbody.innerHTML=usage.map(r=>`<tr>
+      <td class="note">${(r.ts||'').slice(11,19)}</td>
+      <td class="font-mono text-xs">${escapeHtml(r.request_id||'—')}</td>
+      <td class="font-mono text-xs">${escapeHtml(r.model||'—')}</td>
+      <td>${escapeHtml(r.provider||'—')}</td>
+      <td><span class="st ${r.status==='success'?'ok':'err'}">${escapeHtml(r.status||'?')}</span></td>
+      <td>${r.latency_ms}ms</td>
+      <td class="font-mono text-xs">${r.tok_in}+${r.tok_out}</td>
+    </tr>`).join('')||'<tr><td colspan="7" class="note">No usage data</td></tr>';
+  })());
+})();
+
+// ── Settings ──
+(function(){
+  // Populate server info from window globals or defaults
+  const portEl=document.getElementById('set-port');
+  const dirEl=document.getElementById('set-dir');
+  const verEl=document.getElementById('version-badge');
+  if(portEl) portEl.textContent=window.__JKR_PORT__||'20128';
+  if(dirEl)  dirEl.textContent=window.__JKR_DIR__||'~/.jkrouter';
+  if(verEl)  verEl.textContent='v0.3.0-alpha';
+})();
+
+// ── Endpoint ──
+(function(){
+  const baseEl=document.getElementById('ep-base');
+  const keyEl=document.getElementById('ep-key');
+  const claudeEl=document.getElementById('ep-claude');
+  const cursorEl=document.getElementById('ep-cursor');
+  if(baseEl) baseEl.textContent=`http://localhost:${window.__JKR_PORT__||20128}/v1`;
+  if(keyEl)  keyEl.textContent=window.__JKR_BOOTSTRAP_KEY__?'jk_r3_'+window.__JKR_BOOTSTRAP_KEY__.slice(-8):'—';
+  if(claudeEl) claudeEl.textContent=
+    `ANTHROPIC_BASE_URL=http://localhost:${window.__JKR_PORT__||20128}\n`+
+    `ANTHROPIC_API_KEY=jk_r3_${window.__JKR_BOOTSTRAP_KEY__?window.__JKR_BOOTSTRAP_KEY__.slice(-8):'••••••••'}\n`+
+    `ANTHROPIC_MODEL=kr/claude-sonnet-4.5`;
+  if(cursorEl) cursorEl.textContent=JSON.stringify({
+    endpoint:`http://localhost:${window.__JKR_PORT__||20128}/v1`,
+    apiKey:`jk_r3_${window.__JKR_BOOTSTRAP_KEY__?window.__JKR_BOOTSTRAP_KEY__.slice(-8):'••••••••'}`,
+    model:'kr/gemini-2.5-flash-lite'
+  },null,2);
+  window.copyKey=async function(){
+    const key='jk_r3_'+(window.__JKR_BOOTSTRAP_KEY__||'').slice(-8);
+    await navigator.clipboard.writeText(key);
+    alert('Key copied: '+key);
+  };
+})();
+
+// ── Profile ──
+(function(){
+  window.changePassword=async function(){
+    const cur=document.getElementById('prof-cur').value;
+    const nw=document.getElementById('prof-new').value;
+    const conf=document.getElementById('prof-conf').value;
+    if(!cur||!nw||!conf)return alert('Isi semua field');
+    if(nw!==conf)return alert('Password baru tidak cocok');
+    alert('Fitur ubah password akan datang di Sprint berikutnya.');
+  };
+})();
+
+// ── Export / Import ──
+window.exportConfig=async function(){
+  try {
+    const r=await fetch('/api/dashboard/health');
+    const d=await r.json();
+    const blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='jkrouter-config.json';
+    a.click();
+  } catch(e) { alert('Export failed: '+e.message); }
+};
+window.importConfig=function(e){
+  const file=e.target.files[0];
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=function(ev){
+    try {
+      const d=JSON.parse(ev.target.result);
+      fetch('/api/dashboard/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})
+        .then(r=>r.json()).then(()=>alert('Import berhasil! Restart diperlukan.'))
+        .catch(err=>alert('Import gagal: '+err.message));
+    } catch(err) { alert('File JSON tidak valid'); }
+  };
+  reader.readAsText(file);
+};
+</script>
+</body>
+</html>
