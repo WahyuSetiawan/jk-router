@@ -1,23 +1,51 @@
 # JKRouter Makefile
-GO     := /nix/store/i77g9dmcd399rmxk8688qfr4g2wzgk37-go-1.26.7/share/go/bin/go
+GO     := /nix/store/i77g9dmcd399rmxk8688qfr4g2wzgk37-go-1.26.7/bin/go
+GOROOT := /nix/store/i77g9dmcd399rmxk8688qfr4g2wzgk37-go-1.26.7/share/go
 BIN    := /tmp/jkrouter
 CMD    := ./jkserver/cmd
 DATA   := $(HOME)/.jkrouter
 PORT   ?= 20128
+PNPM   := pnpm
+
+# modernc.org/sqlite is pure-Go, no CGO needed
+GOENV = CGO_ENABLED=0 GOROOT=$(GOROOT)
 
 # Load .env if present (overrides defaults above)
 -include .env
 
-.PHONY: build test run dashboard backup export import clean help
+.PHONY: build test run dashboard backup export import clean help build-ui embed-ui deploy
 
 all: build
 
 build:
-	$(GO) build -o $(BIN) $(CMD)
+	env $(GOENV) $(GO) build -o $(BIN) $(CMD)
 	@echo "✓ $(BIN) built"
 
+# ─── Frontend (Nuxt) ───────────────────────────────────────────────────
+
+build-ui:
+	@echo "🛠  Building Nuxt UI..."
+	cd web && $(PNPM) build
+	@echo "✓ web/.output/ ready"
+
+embed-ui:
+	@echo "📦 Embedding UI into jkserver/cmd/..."
+	rm -rf jkserver/cmd/assets jkserver/cmd/_nuxt jkserver/cmd/favicon.ico
+	cp -r web/.output/public/* jkserver/cmd/
+	@echo "✓ UI embedded"
+
+# Build UI + embed + rebuild Go binary (full deploy pipeline)
+deploy: build-ui embed-ui build
+	@echo "✅ Deployed with embedded UI"
+
+# ─── Development ───────────────────────────────────────────────────────
+
+watch-ui:
+	@echo "👀 Watching Nuxt changes..."
+	cd web && $(PNPM) dev
+
 test:
-	$(GO) test ./... -count=1
+	env $(GOENV) $(GO) test ./... -count=1
 
 run: build
 	$(BIN) serve --port $(PORT) --data-dir $(DATA)
@@ -36,16 +64,25 @@ import: build
 
 clean:
 	rm -f $(BIN)
-	$(GO) clean -cache
+	env $(GOENV) $(GO) clean -cache
 
 help:
 	@echo "JKRouter — AI Routing Gateway"
 	@echo ""
-	@echo "  make build    Build binary to /tmp/jkrouter"
-	@echo "  make test     Run all tests"
-	@echo "  make run      Build and run on :$(PORT)"
-	@echo "  make dashboard Open browser to dashboard"
-	@echo "  make backup   Pre-migration backup"
-	@echo "  make export   Export config as JSON"
-	@echo "  make import file=config.json  Import config"
-	@echo "  make clean    Remove binary + go cache"
+	@echo "  Go / Server"
+	@echo "    make build       Build binary to /tmp/jkrouter"
+	@echo "    make test        Run all tests"
+	@echo "    make run         Build and run on :$(PORT)"
+	@echo "    make dashboard   Open browser to dashboard"
+	@echo "    make deploy      Build UI + embed + rebuild binary (full release)"
+	@echo ""
+	@echo "  Frontend (Nuxt)"
+	@echo "    make build-ui    Build Nuxt to web/.output/"
+	@echo "    make embed-ui    Copy .output → jkserver/cmd/ (embed)"
+	@echo "    make watch-ui    Run Nuxt dev server (hot reload)"
+	@echo ""
+	@echo "  Data / Misc"
+	@echo "    make backup      Pre-migration backup"
+	@echo "    make export      Export config as JSON"
+	@echo "    make import file=config.json  Import config"
+	@echo "    make clean       Remove binary + go cache"
