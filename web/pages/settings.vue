@@ -1,15 +1,47 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-const settings = ref({ port: 20128, dataDir: '', version: '0.3.0-alpha' })
-const exportRef = ref<HTMLTextAreaElement | null>(null)
+const settings = ref({ port: 20128, bind: '127.0.0.1', dataDir: '~/.jkrouter' })
+const saving = ref(false)
+const msg = ref('')
+const msgType = ref<'ok' | 'err'>('ok')
 
 async function load() {
-  // Read from config file or env
-  settings.value = { port: 20128, dataDir: process.env.DATA_DIR || '~/.jkrouter', version: '0.3.0-alpha' }
+  try {
+    const r = await fetch('/api/dashboard/settings').then(x => x.json())
+    if (r.settings) settings.value = { ...settings.value, ...r.settings }
+  } catch { /* use defaults */ }
+}
+async function save() {
+  saving.value = true
+  msg.value = ''
+  try {
+    await fetch('/api/dashboard/settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings.value)
+    })
+    msg.value = 'Settings saved'
+    msgType.value = 'ok'
+  } catch (e: any) {
+    msg.value = 'Failed: ' + (e.message || 'unknown error')
+    msgType.value = 'err'
+  } finally {
+    saving.value = false
+  }
 }
 async function exportConfig() {
-  const r = await fetch('/api/dashboard/health').then(x=>x.json())
-  alert('Config export coming soon. Currently run: jkrouter backup')
+  try {
+    const r = await fetch('/api/dashboard/config/export').then(x => x.json())
+    const blob = new Blob([JSON.stringify(r.config, null, 2)], { type: 'application/json' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = 'jkrouter-config.json'
+    a.click()
+    msg.value = 'Config exported'
+    msgType.value = 'ok'
+  } catch (e: any) {
+    msg.value = 'Export failed: ' + (e.message || 'unknown')
+    msgType.value = 'err'
+  }
 }
 const importInput = ref<HTMLInputElement | null>(null)
 async function importConfig(e: Event) {
@@ -19,10 +51,16 @@ async function importConfig(e: Event) {
   reader.onload = async () => {
     try {
       const data = JSON.parse(reader.result as string)
-      // Validate and apply
-      alert('Config imported: ' + Object.keys(data).length + ' keys')
+      await fetch('/api/dashboard/config/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      })
+      msg.value = 'Config imported successfully'
+      msgType.value = 'ok'
+      await load()
     } catch {
-      alert('Invalid config file')
+      msg.value = 'Invalid config file'
+      msgType.value = 'err'
     }
   }
   reader.readAsText(file)
@@ -31,37 +69,55 @@ onMounted(load)
 </script>
 <template>
   <div>
-    <h2 class="text-xl font-bold mb-4">Settings</h2>
-    <div class="space-y-4">
-      <div class="bg-gray-900 rounded-lg p-4 border border-gray-800">
-        <h3 class="font-semibold mb-2">Server</h3>
-        <div class="grid grid-cols-2 gap-3 text-sm">
-          <div><span class="text-gray-500">Port:</span> <span class="font-mono">{{ settings.port }}</span></div>
-          <div><span class="text-gray-500">Data Dir:</span> <span class="font-mono">{{ settings.dataDir }}</span></div>
-          <div><span class="text-gray-500">Version:</span> <span class="font-mono">{{ settings.version }}</span></div>
-        </div>
+    <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin-bottom:1rem">Settings</h2>
+      <div v-if="msg" :style="{color: msgType==='ok' ? 'var(--jkr-grn)' : 'var(--jkr-red)', marginBottom: '1rem'}" class="note">{{ msg }}</div>
+    <div class="card">
+      <h3>Server</h3>
+      <div class="kv">
+        <dt>Port</dt><dd><input v-model.number="settings.port" type="number" class="input" style="width:100px" min="1000" max="65535" /></dd>
+        <dt>Bind</dt><dd>
+          <select v-model="settings.bind" class="select" style="width:160px">
+            <option value="127.0.0.1">127.0.0.1</option>
+            <option value="0.0.0.0">0.0.0.0</option>
+          </select>
+        </dd>
+        <dt>DATA_DIR</dt><dd><input v-model="settings.dataDir" class="input" style="width:240px" /></dd>
       </div>
-      <div class="bg-gray-900 rounded-lg p-4 border border-gray-800">
-        <h3 class="font-semibold mb-2">Backup & Restore</h3>
-        <div class="flex gap-3">
-          <button @click="exportConfig" class="btn-primary">Export Config</button>
-          <label class="btn-secondary cursor-pointer">
-            Import Config
-            <input ref="importInput" type="file" accept=".json" class="hidden" @change="importConfig" />
+      <button class="btn" style="margin-top:.8rem" @click="save" :disabled="saving">{{ saving ? 'Saving…' : 'Save' }}</button>
+    </div>
+    <div class="card">
+      <h3>Backup & Restore</h3>
+      <div class="kv">
+        <dt>Export config</dt><dd><button class="btn ghost btn-sm" @click="exportConfig">Export JSON</button></dd>
+        <dt>Import config</dt><dd>
+          <label class="btn ghost btn-sm" style="cursor:pointer;display:inline-block">
+            Import JSON
+            <input ref="importInput" type="file" accept=".json" class="hidden" @change="importConfig" style="display:none" />
           </label>
-          <button class="btn-secondary ml-auto" onclick="window.location.href='/dashboard/'">Restart Dashboard</button>
-        </div>
+        </dd>
       </div>
-      <div class="bg-gray-900 rounded-lg p-4 border border-gray-800">
-        <h3 class="font-semibold mb-2">Danger Zone</h3>
-        <p class="text-sm text-gray-500 mb-3">Reset all data and start fresh. This cannot be undone.</p>
-        <button class="btn-danger">Reset Data</button>
+      <p class="note">Export/import portable config (providers, combos, pools, keys). Does not include usage logs.</p>
+    </div>
+    <div class="card">
+      <h3>Resilience Defaults</h3>
+      <div class="kv">
+        <dt>Cooldown (429)</dt><dd>60s (default when Retry-After absent)</dd>
+        <dt>WAL checkpoint</dt><dd>5m interval</dd>
+        <dt>Log channel</dt><dd>4096 buffer (drop+counter when full)</dd>
       </div>
+    </div>
+    <div class="card">
+      <h3>Capacity Adapter</h3>
+      <div class="kv">
+        <dt>Vision</dt><dd><label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" disabled /> off</label></dd>
+        <dt>PDF</dt><dd><label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" disabled /> off</label></dd>
+        <dt>Audio input</dt><dd><label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" disabled /> off</label></dd>
+        <dt>Video input</dt><dd><label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" disabled /> off</label></dd>
+      </div>
+      <p class="note">Auto-enabled when combo has no model supporting the requested modality.</p>
     </div>
   </div>
 </template>
 <style scoped>
-.btn-primary { @apply bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium; }
-.btn-secondary { @apply bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 py-2 rounded text-sm inline-block; }
-.btn-danger { @apply bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm font-medium; }
+.hidden { display: none; }
 </style>
