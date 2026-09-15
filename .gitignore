@@ -37,6 +37,9 @@ backups/
 result
 result-*
 
+# ─── Direnv ───────────────────────────────────────────────────────────
+.direnv/
+
 
 # ─── IDE ──────────────────────────────────────────────────────────────
 .vscode/
@@ -48,6 +51,12 @@ result-*
 # ─── OS ───────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# ─── Root-level npm noise (pnpm ran here by mistake) ────────────────
+package.json
+package-lock.json
+pnpm-lock.yaml
+node_modules/
 
 # ─── Logs ─────────────────────────────────────────────────────────────
 *.log
