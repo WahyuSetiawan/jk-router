@@ -24,4 +24,4 @@ COPY --from=builder /jkrouter /usr/local/bin/jkrouter
 EXPOSE 20128
 ENV DATA_DIR=/data PORT=20128
 VOLUME ["/data"]
-ENTRYPOINT ["jkrouter", "serve", "--port", "20128"]
+ENTRYPOINT ["sh", "-c", "jkrouter serve --port $PORT"]
