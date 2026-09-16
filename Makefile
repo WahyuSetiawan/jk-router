@@ -13,7 +13,7 @@ GOENV = CGO_ENABLED=0 GOROOT=$(GOROOT)
 # Load .env if present (overrides defaults above)
 -include .env
 
-.PHONY: build test run dashboard backup export import clean help build-ui embed-ui deploy
+.PHONY: build test run dev dashboard backup export import clean help build-ui embed-ui deploy
 
 all: build
 
@@ -52,6 +52,9 @@ test:
 run: build
 	$(BIN) serve --port $(PORT) --data-dir $(DATA)
 
+dev: build
+	@./dev.sh
+
 dashboard: build
 	$(BIN) dashboard --port $(PORT)
 
@@ -75,6 +78,7 @@ help:
 	@echo "    make build       Build binary to /tmp/jkrouter"
 	@echo "    make test        Run all tests"
 	@echo "    make run         Build and run on :$(PORT)"
+	@echo "    make dev         Build + run backend, then start Nuxt dev (auto-wait)"
 	@echo "    make dashboard   Open browser to dashboard"
 	@echo "    make deploy      Build UI + embed + rebuild binary (full release)"
 	@echo ""

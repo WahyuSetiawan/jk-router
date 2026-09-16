@@ -11,7 +11,7 @@ export default defineNuxtConfig({
     server: {
       proxy: process.env.VITE_API_URL
         ? {} // no proxy when running against remote
-        : { '/api': { target: 'http://localhost:20127', changeOrigin: true } }
+        : { '/api': { target: 'http://127.0.0.1:20127', changeOrigin: true } }
     }
   }
 })
