@@ -5,19 +5,32 @@ const saving = ref(false)
 const msg = ref('')
 const msgType = ref<'ok' | 'err'>('ok')
 
+// Capacity adapter: { vision: "model-id", pdf: "", ... } or null
+const capAdapter = ref<Record<string, string>>({})
+
 async function load() {
   try {
     const r = await fetch('/api/dashboard/settings').then(x => x.json())
     if (r.settings) settings.value = { ...settings.value, ...r.settings }
+    if (r.settings?.capacityAdapter) {
+      try { capAdapter.value = JSON.parse(r.settings.capacityAdapter) } catch { /* ignore */ }
+    }
   } catch { /* use defaults */ }
 }
 async function save() {
   saving.value = true
   msg.value = ''
   try {
+    const payload: Record<string, unknown> = { ...settings.value }
+    // Convert capAdapter object → JSON string for backend
+    if (Object.keys(capAdapter.value).length > 0) {
+      payload.capacityAdapter = JSON.stringify(capAdapter.value)
+    } else {
+      payload.capacityAdapter = ''
+    }
     await fetch('/api/dashboard/settings', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings.value)
+      body: JSON.stringify(payload)
     })
     msg.value = 'Settings saved'
     msgType.value = 'ok'
@@ -65,6 +78,19 @@ async function importConfig(e: Event) {
   }
   reader.readAsText(file)
 }
+
+const capModels = ['oc/mimo-v2.5-free', 'openrouter/anthropic/claude-3-haiku', 'openrouter/google/gemini-2.0-flash-lite']
+const capKeys = ['vision', 'pdf', 'audio_input', 'video_input'] as const
+
+function setCap(key: string, model: string) {
+  if (model === 'off') {
+    const { [key]: _, ...rest } = capAdapter.value
+    capAdapter.value = rest
+  } else {
+    capAdapter.value = { ...capAdapter.value, [key]: model }
+  }
+}
+
 onMounted(load)
 </script>
 <template>
@@ -108,16 +134,26 @@ onMounted(load)
     </div>
     <div class="card">
       <h3>Capacity Adapter</h3>
-      <div class="kv">
-        <dt>Vision</dt><dd><label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" disabled /> off</label></dd>
-        <dt>PDF</dt><dd><label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" disabled /> off</label></dd>
-        <dt>Audio input</dt><dd><label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" disabled /> off</label></dd>
-        <dt>Video input</dt><dd><label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" disabled /> off</label></dd>
+      <p class="note" style="margin-bottom:.5rem">Fallback models when combo lacks required capability. Auto-applied per request.</p>
+      <div class="kv" style="flex-direction:column;gap:.4rem">
+        <div v-for="k in capKeys" :key="k" style="display:flex;align-items:center;gap:1rem">
+          <dt style="min-width:120px;text-transform:capitalize">{{ k.replace('_',' ') }}</dt>
+          <dd style="display:flex;align-items:center;gap:.5rem">
+            <label style="display:flex;align-items:center;gap:.3rem;cursor:pointer">
+              <input type="radio" :name="k" :value="'off'" :checked="!capAdapter[k]" @change="setCap(k,'off')" />
+              <span>off</span>
+            </label>
+            <select v-model="capAdapter[k]" class="select" style="width:220px" @change="setCap(k, $event.target.value)">
+              <option value="off">off</option>
+              <option v-for="m in capModels" :value="m">{{ m }}</option>
+            </select>
+          </dd>
+        </div>
       </div>
-      <p class="note">Auto-enabled when combo has no model supporting the requested modality.</p>
     </div>
   </div>
 </template>
 <style scoped>
 .hidden { display: none; }
+.kv { display: flex; flex-direction: column; gap: .4rem; }
 </style>

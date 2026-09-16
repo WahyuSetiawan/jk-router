@@ -743,6 +743,10 @@ func GetSettingsHandler(d *db.DB) http.HandlerFunc {
 		if v := sv("cooldown_429"); v != "" {
 			settings["cooldown_429"] = v
 		}
+		// Capacity adapter settings (JSON blob)
+		if v := sv("capacity_adapter"); v != "" {
+			settings["capacityAdapter"] = v
+		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"settings": settings})
 	}
 }
@@ -751,12 +755,13 @@ func GetSettingsHandler(d *db.DB) http.HandlerFunc {
 func PutSettingsHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Port         string `json:"port"`
-			Bind         string `json:"bind"`
-			DataDir      string `json:"dataDir"`
-			LogBuffer    string `json:"logBuffer"`
-			WalInterval  string `json:"walInterval"`
-			Cooldown429  string `json:"cooldown429"`
+			Port           string      `json:"port"`
+			Bind           string      `json:"bind"`
+			DataDir        string      `json:"dataDir"`
+			LogBuffer      string      `json:"logBuffer"`
+			WalInterval    string      `json:"walInterval"`
+			Cooldown429    string      `json:"cooldown429"`
+			CapacityAdapter json.RawMessage `json:"capacityAdapter"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, `{"error":"decode"}`, 400)
@@ -774,6 +779,9 @@ func PutSettingsHandler(d *db.DB) http.HandlerFunc {
 		set("log_buffer", body.LogBuffer)
 		set("wal_interval", body.WalInterval)
 		set("cooldown_429", body.Cooldown429)
+		if len(body.CapacityAdapter) > 0 {
+			d.Exec("INSERT OR REPLACE INTO settings_kv (key, value) VALUES (?, ?)", "capacity_adapter", string(body.CapacityAdapter))
+		}
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}
 }

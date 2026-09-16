@@ -70,6 +70,12 @@ type RoutingConfig struct {
 	// SaveStateFunc is called after every account state transition (429/401/403).
 	// ponytail: single call per request; batch across requests if throughput matters.
 	SaveStateFunc func(id int64, state string, strike int, cooledUntil int64, updatedAt int64)
+	// RefreshOAuthToken is called before executing a request when the account's
+	// OAuth token is expired or about to expire (within tokenRefreshAhead). It must
+	// update the in-memory Account.APIKey and Engine.Account.ExpiresAt via the store,
+	// and persist the new secret to the DB. Returns true if refresh succeeded.
+	RefreshOAuthToken func(id int64) bool
+	tokenRefreshAhead time.Duration
 }
 
 // DefaultRoutingConfig returns a config with sensible defaults.
@@ -115,6 +121,23 @@ func ExecuteRouting(body []byte, bearer string, stream bool, w http.ResponseWrit
 
 		exe := buildExecutor(c, cfg)
 		exe.StreamGuard.Store(false)
+
+		// Refresh OAuth token if expired or about to expire.
+		if cfg.RefreshOAuthToken != nil {
+			a := cfg.AccountStore.Get(c.accountID)
+			if a != nil && a.AuthType == "oauth" && !a.ExpiresAt.IsZero() {
+				refreshAhead := cfg.tokenRefreshAhead
+				if refreshAhead == 0 {
+					refreshAhead = 5 * time.Minute
+				}
+				if time.Now().Add(refreshAhead).After(a.ExpiresAt) {
+					if !cfg.RefreshOAuthToken(c.accountID) {
+						log.Printf("[routing] req=%s token refresh failed for account %d, skipping", reqID, c.accountID)
+						continue
+					}
+				}
+			}
+		}
 
 		// Use a buffer writer for failed attempts so we don't leak partial responses.
 		bw := newRouteBufferWriter()

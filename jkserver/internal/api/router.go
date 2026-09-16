@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -40,12 +42,28 @@ func Router(d *db.DB, transReg *translator.Registry, ul *UsageLogger) chi.Router
 	// Build ProviderMeta slice from the registry package.
 	providers := buildProviderMetas()
 
+	// Load capacity adapter settings from DB.
+	var capAdapterJSON string
+	d.QueryRow("SELECT value FROM settings_kv WHERE key='capacity_adapter'").Scan(&capAdapterJSON)
+	var capAdapter *engine.CapacityAdapter
+	if capAdapterJSON != "" {
+		var cfgMap map[string]string
+		if json.Unmarshal([]byte(capAdapterJSON), &cfgMap) == nil && len(cfgMap) > 0 {
+			converted := make(map[engine.Capability]string, len(cfgMap))
+			for k, v := range cfgMap {
+				converted[engine.Capability(k)] = v
+			}
+			capAdapter = engine.NewCapacityAdapter(converted)
+		}
+	}
+
 	cfg := &engine.RoutingConfig{
-		AccountStore:  accountStore,
-		ComboStore:    comboStore,
-		TranslatorReg: transReg,
-		ProxyPoolStore: poolStore,
-		Providers:     providers,
+		AccountStore:      accountStore,
+		ComboStore:        comboStore,
+		TranslatorReg:     transReg,
+		ProxyPoolStore:    poolStore,
+		CapacityAdapter:   capAdapter,
+		Providers:         providers,
 		LogUsage: func(entry engine.RouteLogEntry) {
 			if ul == nil {
 				return
@@ -63,6 +81,61 @@ func Router(d *db.DB, transReg *translator.Registry, ul *UsageLogger) chi.Router
 				q.DB().Exec(`UPDATE accounts SET state=?, strike_count=?, cooled_until=?, updated_at=? WHERE id=?`,
 					state, strike, cooledUntil, updatedAt, id)
 			})
+		},
+		RefreshOAuthToken: func(id int64) bool {
+			var providerID, encKey string
+			var expiresAt int64
+			d.EnqueueWriteSync(func(q *db.Queue) {
+				q.DB().QueryRow(`SELECT provider_id, encrypted_key, expires_at FROM accounts WHERE id=?`, id).Scan(&providerID, &encKey, &expiresAt)
+			})
+			if providerID == "" || encKey == "" {
+				return false
+			}
+			tokenPlain, err := db.DecryptSecret(encKey)
+			if err != nil {
+				log.Printf("[oauth] failed to decrypt token for account %d: %v", id, err)
+				return false
+			}
+			var token map[string]string
+			if err := json.Unmarshal([]byte(tokenPlain), &token); err != nil {
+				log.Printf("[oauth] failed to parse token for account %d: %v", id, err)
+				return false
+			}
+			refreshTokenStr := token["refresh_token"]
+			if refreshTokenStr == "" {
+				log.Printf("[oauth] no refresh_token for account %d (%s)", id, providerID)
+				return false
+			}
+			newToken, err := refreshToken(providerID, refreshTokenStr)
+			if err != nil {
+				log.Printf("[oauth] refresh failed for account %d (%s): %v", id, providerID, err)
+				return false
+			}
+			newTokenJSON, _ := json.Marshal(newToken)
+			newEnc, _ := db.EncryptSecret(string(newTokenJSON))
+			var newExpiresAt int64
+			if v, ok := newToken["expires_in"]; ok {
+				if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+					newExpiresAt = time.Now().Unix() + n
+				}
+			}
+			d.EnqueueWriteSync(func(q *db.Queue) {
+				q.DB().Exec(`UPDATE accounts SET encrypted_key=?, expires_at=? WHERE id=?`, newEnc, newExpiresAt, id)
+			})
+			accountStore.Upsert(&engine.Account{
+				APIKey:   string(newTokenJSON), // will be decrypted again on next load
+				ExpiresAt: time.Unix(newExpiresAt, 0),
+			})
+			// Re-decrypt for immediate use
+			if decoded, err := db.DecryptSecret(newEnc); err == nil {
+				var t map[string]string
+				json.Unmarshal([]byte(decoded), &t)
+				if tk := t["access_token"]; tk != "" {
+					accountStore.Upsert(&engine.Account{APIKey: tk, ExpiresAt: time.Unix(newExpiresAt, 0)})
+				}
+			}
+			log.Printf("[oauth] token refreshed for account %d (%s)", id, providerID)
+			return true
 		},
 	}
 
@@ -159,10 +232,16 @@ func Router(d *db.DB, transReg *translator.Registry, ul *UsageLogger) chi.Router
 			http.Error(w, `{"error":"encrypt token"}`, http.StatusInternalServerError)
 			return
 		}
+		var expiresAt int64
+		if v, ok := token["expires_in"]; ok {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				expiresAt = time.Now().Unix() + n
+			}
+		}
 		d.EnqueueWriteSync(func(q *db.Queue) {
 			q.DB().Exec(
-				`INSERT INTO connections (provider_id, name, auth_type, secret_enc, priority, disabled) VALUES (?, ?, 'oauth', ?, 0, 0)`,
-				provider, "oauth-"+stateID[:8], encrypted,
+				`INSERT INTO accounts (provider_id, label, auth_type, encrypted_key, state, expires_at) VALUES (?, ?, 'oauth', ?, 'active', ?)`,
+				provider, "oauth-"+stateID[:8], encrypted, expiresAt,
 			)
 		})
 		w.Header().Set("Content-Type", "application/json")
@@ -187,11 +266,12 @@ func loadAccountStore(d *db.DB) *engine.AccountStore {
 		State       string
 		StrikeCount int
 		CooledUntil int64
+		ExpiresAt   int64
 	}
 	d.EnqueueWriteSync(func(q *db.Queue) {
 		rs, err := q.DB().Query(`
 			SELECT id, provider_id, label, auth_type, encrypted_key, proxy_pool_id,
-			       priority, COALESCE(state,'active'), COALESCE(strike_count,0), COALESCE(cooled_until,0)
+			       priority, COALESCE(state,'active'), COALESCE(strike_count,0), COALESCE(cooled_until,0), COALESCE(expires_at,0)
 			FROM accounts ORDER BY priority DESC, id`)
 		if err != nil {
 			return
@@ -209,8 +289,9 @@ func loadAccountStore(d *db.DB) *engine.AccountStore {
 				State       string
 				StrikeCount int
 				CooledUntil int64
+				ExpiresAt   int64
 			}
-			if err := rs.Scan(&r.ID, &r.ProviderID, &r.Label, &r.AuthType, &r.EncKey, &r.ProxyPoolID, &r.Priority, &r.State, &r.StrikeCount, &r.CooledUntil); err != nil {
+			if err := rs.Scan(&r.ID, &r.ProviderID, &r.Label, &r.AuthType, &r.EncKey, &r.ProxyPoolID, &r.Priority, &r.State, &r.StrikeCount, &r.CooledUntil, &r.ExpiresAt); err != nil {
 				continue
 			}
 			rows = append(rows, &r)
@@ -241,6 +322,7 @@ func loadAccountStore(d *db.DB) *engine.AccountStore {
 			State:       state,
 			StrikeCount: r.StrikeCount,
 			CooledUntil: time.Unix(r.CooledUntil, 0),
+			ExpiresAt:   time.Unix(r.ExpiresAt, 0),
 		})
 	}
 	return store
@@ -464,6 +546,42 @@ func exchangeCode(provider, code string) (map[string]string, error) {
 		"token_type":   "bearer",
 		"expires_in":   "3600",
 	}, nil
+}
+
+func refreshToken(provider, refreshToken string) (map[string]string, error) {
+	cbURL := getOAuthCallbackURL(oauthServerAddr)
+	if provider == "openai" {
+		resp, err := http.PostForm("https://auth.openai.com/oauth/token", url.Values{
+			"grant_type":    {"refresh_token"},
+			"refresh_token": {refreshToken},
+			"redirect_uri":  {cbURL},
+			"client_id":     {""},
+			"client_secret": {""},
+		})
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		var result map[string]string
+		json.NewDecoder(resp.Body).Decode(&result)
+		return result, nil
+	}
+	if provider == "kiro" {
+		resp, err := http.PostForm("https://api.kiro.dev/oauth/token", url.Values{
+			"grant_type":    {"refresh_token"},
+			"refresh_token": {refreshToken},
+			"redirect_uri":  {cbURL},
+			"client_id":     {"jkrouter"},
+		})
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		var result map[string]string
+		json.NewDecoder(resp.Body).Decode(&result)
+		return result, nil
+	}
+	return nil, fmt.Errorf("provider %s: token refresh not supported", provider)
 }
 
 func generateRequestID() string {

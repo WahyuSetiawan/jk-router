@@ -18,7 +18,7 @@ GOENV = CGO_ENABLED=0 GOROOT=$(GOROOT)
 all: build
 
 build:
-	env $(GOENV) $(GO) build -o $(BIN) $(CMD)
+	env $(GOENV) $(GO) build -ldflags="-s -w" -o $(BIN) $(CMD)
 	@echo "✓ $(BIN) built"
 
 # ─── Frontend (Nuxt) ───────────────────────────────────────────────────

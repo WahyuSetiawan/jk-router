@@ -30,6 +30,7 @@ type Account struct {
 	State        AccountState
 	StrikeCount  int
 	CooledUntil  time.Time
+	ExpiresAt    time.Time // zero if none / api_key auth
 	UpdatedAtlas time.Time
 }
 
