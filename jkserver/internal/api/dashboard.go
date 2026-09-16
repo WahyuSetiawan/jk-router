@@ -4,10 +4,11 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
-	"crypto/sha256"
 	"fmt"
 	"net/http"
 	"strings"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/go-chi/chi/v5"
 
@@ -812,13 +813,17 @@ func ChangePasswordHandler(d *db.DB) http.HandlerFunc {
 				http.Error(w, `{"error":"current password required"}`, 400)
 				return
 			}
-			if !sha256Check(body.Current, existingHash) {
+			if !bcryptCheck(body.Current, existingHash) {
 				http.Error(w, `{"error":"incorrect password"}`, 401)
 				return
 			}
 		}
 		// Set new password
-		newHash := sha256Hash(body.New)
+		newHash, err := bcryptHash(body.New)
+		if err != nil {
+			http.Error(w, `{"error":"bcrypt failed"}`, 500)
+			return
+		}
 		d.Exec("INSERT OR REPLACE INTO settings_kv (key, value) VALUES ('dashboard_password_hash', ?)", newHash)
 		d.Exec("INSERT OR REPLACE INTO settings_kv (key, value) VALUES ('dashboard_first_run', 'false')")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -915,14 +920,17 @@ func ImportConfigHandler(d *db.DB) http.HandlerFunc {
 	}
 }
 
-func sha256Hash(pw string) string {
-	h := sha256.Sum256([]byte(pw))
-	return fmt.Sprintf("%x", h)
+func bcryptHash(pw string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
 }
 
-func sha256Check(pw, hash string) bool {
-	computed := sha256.Sum256([]byte(pw))
-	return fmt.Sprintf("%x", computed) == hash
+func bcryptCheck(pw, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(pw))
+	return err == nil
 }
 
 // maskKey shows first 4 and last 2 chars with dots in between.

@@ -10,7 +10,6 @@ import (
 // CapacityAdapter manages a pool of fallback models for when combo members
 // lack required capabilities (vision, audio, etc.).
 type CapacityAdapter struct {
-	// adapterModels maps capability → fallback model ID.
 	adapterModels map[Capability]string
 }
 
@@ -32,7 +31,6 @@ func (a *CapacityAdapter) WrapRequest(body []byte, required []Capability, comboM
 		return body, "", nil
 	}
 
-	// Check if any required capability needs an adapter.
 	var adapterModel string
 	for _, cap := range required {
 		if fallback, ok := a.adapterModels[cap]; ok {
@@ -44,7 +42,6 @@ func (a *CapacityAdapter) WrapRequest(body []byte, required []Capability, comboM
 		return body, "", nil
 	}
 
-	// Prepend adapter model as a system-level hint so downstream translators know.
 	modified, _ := json.Marshal(req)
 	log.Printf("[adapter] wrapped request with fallback model %s for capabilities %v", adapterModel, required)
 	return modified, adapterModel, nil

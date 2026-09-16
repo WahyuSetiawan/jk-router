@@ -112,6 +112,21 @@ func (s *AccountStore) MarkCoolingDown(id int64, duration time.Duration) {
 	log.Printf("[account] %s (%d) -> cooling_down for %v (strikes=%d)", a.Label, id, base, a.StrikeCount)
 }
 
+// SaveStateCommit writes the full in-memory account state to the database.
+// Call after any state transition (MarkCoolingDown, MarkDisabled, Reenable).
+// ponytail: single UPDATE per account; batch once throughput becomes an issue.
+func (s *AccountStore) SaveStateCommit(fn func(id int64, state string, strike int, cooledUntil int64, updatedAt int64)) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, a := range s.accounts {
+		cooledUntil := int64(0)
+		if !a.CooledUntil.IsZero() {
+			cooledUntil = a.CooledUntil.Unix()
+		}
+		fn(a.ID, string(a.State), a.StrikeCount, cooledUntil, a.UpdatedAtlas.Unix())
+	}
+}
+
 // MarkDisabled permanently disables the account until manual re-enable.
 func (s *AccountStore) MarkDisabled(id int64) {
 	s.mu.Lock()

@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
@@ -17,9 +16,9 @@ import (
 
 	"jkrouter/jkserver/internal/db"
 	"jkrouter/jkserver/internal/engine"
-	"jkrouter/jkserver/internal/executors"
 	"jkrouter/jkserver/internal/oauth"
 	"jkrouter/jkserver/internal/providers/registry"
+	"jkrouter/jkserver/internal/proxypool"
 	"jkrouter/jkserver/internal/translator"
 )
 
@@ -28,6 +27,42 @@ func Router(d *db.DB, transReg *translator.Registry, ul *UsageLogger) chi.Router
 	r := chi.NewRouter()
 
 	oauthStore := oauth.NewStore(5 * time.Minute)
+
+	// Load combo fallback state from DB.
+	accountStore := loadAccountStore(d)
+	comboStore := loadComboStore(d)
+
+	// Load proxy pool store.
+	poolStore := loadProxyPoolStore(d)
+
+	// Build ProviderMeta slice from the registry package.
+	providers := buildProviderMetas()
+
+	cfg := &engine.RoutingConfig{
+		AccountStore:  accountStore,
+		ComboStore:    comboStore,
+		TranslatorReg: transReg,
+		ProxyPoolStore: poolStore,
+		Providers:     providers,
+		LogUsage: func(entry engine.RouteLogEntry) {
+			if ul == nil {
+				return
+			}
+			ul.LogRequest(UsageEntry{
+				RequestID: entry.RequestID,
+				Model:     entry.Model,
+				Provider:  entry.Provider,
+				Status:    entry.Status,
+				LatencyMs: entry.LatencyMs,
+			})
+		},
+		SaveStateFunc: func(id int64, state string, strike int, cooledUntil, updatedAt int64) {
+			d.EnqueueWriteSync(func(q *db.Queue) {
+				q.DB().Exec(`UPDATE accounts SET state=?, strike_count=?, cooled_until=?, updated_at=? WHERE id=?`,
+					state, strike, cooledUntil, updatedAt, id)
+			})
+		},
+	}
 
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -56,104 +91,28 @@ func Router(d *db.DB, transReg *translator.Registry, ul *UsageLogger) chi.Router
 			http.Error(w, fmt.Sprintf(`{"error":"failed to read body: %v"}`, err), http.StatusBadRequest)
 			return
 		}
+		engine.ExecuteRouting(body, bearer, stream, w, cfg)
+	})
 
-		start := time.Now()
-		reqID := generateRequestID()
-		model, _, _, _ := executors.ParseOpenAIChatBody(body)
-		if model == "" {
-			http.Error(w, `{"error":"model is required"}`, http.StatusBadRequest)
+	r.Post("/completions", func(w http.ResponseWriter, req *http.Request) {
+		body, _ := io.ReadAll(io.LimitReader(req.Body, 10*1024*1024))
+		var comp struct {
+			Model     string      `json:"model"`
+			Prompt    interface{} `json:"prompt"`
+			MaxTokens int         `json:"max_tokens"`
+			Stream    bool        `json:"stream"`
+		}
+		if err := json.Unmarshal(body, &comp); err != nil {
+			http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
 			return
 		}
-
-		requiredCaps := engine.DetectRequiredCapabilities(body)
-		requiredCapsList := make([]engine.Capability, 0, len(requiredCaps))
-		for c := range requiredCaps {
-			requiredCapsList = append(requiredCapsList, c)
-		}
-
-		regs := registry.GetRegistries()
-		type candidate struct {
-			reg        *registry.Registry
-			model      registry.Model
-			matchScore int
-		}
-		var candidates []candidate
-		for _, reg := range regs {
-			for _, m := range reg.Models {
-				modelCaps := toModelCaps(m)
-				score := countMatchedCaps(modelCaps, requiredCapsList)
-				candidates = append(candidates, candidate{reg: reg, model: m, matchScore: score})
-			}
-		}
-		sort.SliceStable(candidates, func(i, j int) bool {
-			return candidates[i].matchScore > candidates[j].matchScore
+		chatBody, _ := json.Marshal(map[string]interface{}{
+			"model":    comp.Model,
+			"messages": []map[string]string{{"role": "user", "content": fmt.Sprint(comp.Prompt)}},
+			"max_tokens": comp.MaxTokens,
+			"stream":   comp.Stream,
 		})
-
-		var selected *candidate
-		for i := range candidates {
-			c := &candidates[i]
-			if c.matchScore > 0 || len(requiredCapsList) == 0 {
-				selected = c
-				break
-			}
-		}
-		if selected == nil {
-			http.Error(w, fmt.Sprintf(`{"error":"no provider supports model %q"}`, model), http.StatusNotFound)
-			return
-		}
-
-		client := selected.reg.ClientFn(bearer)
-		exe := executors.NewExecutor(
-			selected.reg.BaseURL,
-			selected.reg.ChatPath,
-			selected.reg.AuthHeader,
-			selected.reg.AuthPrefix,
-			selected.reg.Headers,
-		)
-		exe.Client = client
-
-		logUsage := func(status string) {
-			if ul != nil {
-				ul.LogRequest(UsageEntry{
-					RequestID: reqID,
-					Model:  model,
-					Provider: selected.reg.ID,
-					Status:    status,
-					LatencyMs: int(time.Since(start).Milliseconds()),
-				})
-			}
-		}
-
-		if selected.reg.ID == "openai" {
-			err = exe.Execute(body, bearer, stream, w)
-			if err != nil {
-				logUsage("error")
-				http.Error(w, fmt.Sprintf(`{"error":"upstream error: %v"}`, err), http.StatusBadGateway)
-				return
-			}
-			logUsage("success")
-			return
-		}
-
-		tf := transReg.Get(translator.PairFor(translator.FormatOpenAI, translator.FormatAnthropic))
-		if tf == nil {
-			logUsage("error")
-			http.Error(w, `{"error":"no translator available for this provider"}`, http.StatusBadGateway)
-			return
-		}
-		translatedBody, err := tf.Request(body, translator.FormatOpenAI, translator.FormatAnthropic)
-		if err != nil {
-			logUsage("error")
-			http.Error(w, fmt.Sprintf(`{"error":"translation failed: %v"}`, err), http.StatusBadGateway)
-			return
-		}
-		err = exe.Execute(translatedBody, bearer, stream, w)
-		if err != nil {
-			logUsage("error")
-			http.Error(w, fmt.Sprintf(`{"error":"upstream error: %v"}`, err), http.StatusBadGateway)
-			return
-		}
-		logUsage("success")
+		engine.ExecuteRouting(chatBody, extractBearer(req), comp.Stream, w, cfg)
 	})
 
 	// --- Dashboard OAuth endpoints ---
@@ -205,6 +164,190 @@ func Router(d *db.DB, transReg *translator.Registry, ul *UsageLogger) chi.Router
 	return r
 }
 
+// ─────────────────── DB loaders ─────────────────────────────────────────────
+
+func loadAccountStore(d *db.DB) *engine.AccountStore {
+	store := engine.NewAccountStore()
+	var rows []*struct {
+		ID          int64
+		ProviderID  string
+		Label       string
+		AuthType    string
+		EncKey      []byte
+		ProxyPoolID *int64
+		Priority    int
+		State       string
+		StrikeCount int
+		CooledUntil int64
+	}
+	d.EnqueueWriteSync(func(q *db.Queue) {
+		rs, err := q.DB().Query(`
+			SELECT id, provider_id, label, auth_type, encrypted_key, proxy_pool_id,
+			       priority, COALESCE(state,'active'), COALESCE(strike_count,0), COALESCE(cooled_until,0)
+			FROM accounts ORDER BY priority DESC, id`)
+		if err != nil {
+			return
+		}
+		defer rs.Close()
+		for rs.Next() {
+			var r struct {
+				ID          int64
+				ProviderID  string
+				Label       string
+				AuthType    string
+				EncKey      []byte
+				ProxyPoolID *int64
+				Priority    int
+				State       string
+				StrikeCount int
+				CooledUntil int64
+			}
+			if err := rs.Scan(&r.ID, &r.ProviderID, &r.Label, &r.AuthType, &r.EncKey, &r.ProxyPoolID, &r.Priority, &r.State, &r.StrikeCount, &r.CooledUntil); err != nil {
+				continue
+			}
+			rows = append(rows, &r)
+		}
+	})
+	for _, r := range rows {
+		keyPlain := ""
+		if r.EncKey != nil {
+			dec, err := db.DecryptSecret(string(r.EncKey))
+			if err == nil {
+				keyPlain = dec
+			}
+		}
+		state := engine.StateActive
+		if r.State == "cooling_down" && r.CooledUntil > 0 {
+			state = engine.StateCoolingDown
+		} else if r.State == "disabled" {
+			state = engine.StateDisabled
+		}
+		store.Upsert(&engine.Account{
+			ID:          r.ID,
+			ProviderID:  r.ProviderID,
+			Label:       r.Label,
+			AuthType:    r.AuthType,
+			APIKey:      keyPlain,
+			ProxyPoolID: r.ProxyPoolID,
+			Priority:    r.Priority,
+			State:       state,
+			StrikeCount: r.StrikeCount,
+			CooledUntil: time.Unix(r.CooledUntil, 0),
+		})
+	}
+	return store
+}
+
+func loadComboStore(d *db.DB) *engine.ComboStore {
+	store := engine.NewComboStore()
+	type row struct {
+		ID        int64
+		Name      string
+		ModelIDs  string
+		Strategy  string
+		AccountID int64
+	}
+	var rows []row
+	d.EnqueueWriteSync(func(q *db.Queue) {
+		rs, err := q.DB().Query(`
+			SELECT c.id, c.name, c.model_ids, c.strategy, ca.account_id
+			FROM combos c LEFT JOIN combo_accounts ca ON ca.combo_id = c.id
+			ORDER BY c.id, ca.priority`)
+		if err != nil {
+			return
+		}
+		defer rs.Close()
+		for rs.Next() {
+			var r row
+			if err := rs.Scan(&r.ID, &r.Name, &r.ModelIDs, &r.Strategy, &r.AccountID); err != nil {
+				continue
+			}
+			rows = append(rows, r)
+		}
+	})
+	// Group by combo ID.
+	comboAccounts := make(map[int64][]int64)
+	for _, r := range rows {
+		comboAccounts[r.ID] = append(comboAccounts[r.ID], r.AccountID)
+	}
+	// Insert each unique combo.
+	seen := make(map[int64]bool)
+	for _, r := range rows {
+		if seen[r.ID] {
+			continue
+		}
+		seen[r.ID] = true
+		store.Add(r.Name, r.Strategy, parseModelIDs(r.ModelIDs), comboAccounts[r.ID])
+	}
+	return store
+}
+
+func loadProxyPoolStore(d *db.DB) *proxypool.Store {
+	store := proxypool.NewStore()
+	d.EnqueueWriteSync(func(q *db.Queue) {
+		rs, err := q.DB().Query(`SELECT id, name, proxy_url, no_proxy, strict_proxy, is_active FROM proxy_pools`)
+		if err != nil || rs == nil {
+			return
+		}
+		defer rs.Close()
+		for rs.Next() {
+			var id int64
+			var name, proxyURL, noProxy string
+			var strict, active bool
+			if err := rs.Scan(&id, &name, &proxyURL, &noProxy, &strict, &active); err != nil {
+				continue
+			}
+			store.Add(name, proxyURL, noProxy, strict)
+			if p := store.Get(id); p != nil {
+				p.IsActive = active
+			}
+		}
+	})
+	return store
+}
+
+// ─────────────────── provider metadata ───────────────────────────────────────
+
+func buildProviderMetas() []*engine.ProviderMeta {
+	regs := registry.GetRegistries()
+	out := make([]*engine.ProviderMeta, 0, len(regs))
+	for _, reg := range regs {
+		out = append(out, &engine.ProviderMeta{
+			ID:         reg.ID,
+			BaseURL:    reg.BaseURL,
+			ChatPath:   reg.ChatPath,
+			AuthHeader: reg.AuthHeader,
+			AuthPrefix: reg.AuthPrefix,
+			Headers:    reg.Headers,
+			ClientFn:   reg.ClientFn,
+			Format:     regChatFormat(reg.ID),
+			ModelIDs:   modelIDs(reg),
+		})
+	}
+	return out
+}
+
+func modelIDs(reg *registry.Registry) []string {
+	ids := make([]string, len(reg.Models))
+	for i, m := range reg.Models {
+		ids[i] = m.ID
+	}
+	return ids
+}
+
+func regChatFormat(id string) string {
+	switch id {
+	case "anthropic":
+		return "anthropic"
+	case "gemini":
+		return "gemini"
+	default:
+		return "openai"
+	}
+}
+
+// ─────────────────── helpers ─────────────────────────────────────────────────
+
 func listAllModels() []registry.Model {
 	regs := registry.GetRegistries()
 	seen := make(map[string]bool)
@@ -220,24 +363,6 @@ func listAllModels() []registry.Model {
 	return out
 }
 
-func toModelCaps(m registry.Model) engine.ModelCaps {
-	caps := make([]engine.Capability, len(m.Capabilities))
-	for i, c := range m.Capabilities {
-		caps[i] = engine.Capability(c)
-	}
-	return engine.ModelCaps{ID: m.ID, Capabilities: caps}
-}
-
-func countMatchedCaps(mc engine.ModelCaps, required []engine.Capability) int {
-	count := 0
-	for _, c := range required {
-		if mc.HasCapability(c) {
-			count++
-		}
-	}
-	return count
-}
-
 func extractBearer(req *http.Request) string {
 	auth := req.Header.Get("Authorization")
 	if strings.HasPrefix(auth, "Bearer ") {
@@ -245,6 +370,8 @@ func extractBearer(req *http.Request) string {
 	}
 	return ""
 }
+
+func extractBearerFromReq(s string) string { return s }
 
 func buildOAuthAuthURL(provider, stateID string, req *http.Request) string {
 	switch provider {
@@ -301,4 +428,18 @@ func generateKey() string {
 	b := make([]byte, 24)
 	rand.Read(b)
 	return "jk_" + hex.EncodeToString(b)
+}
+
+func parseModelIDs(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
