@@ -18,7 +18,9 @@ GOENV = CGO_ENABLED=0 GOROOT=$(GOROOT)
 all: build
 
 build:
-	env $(GOENV) $(GO) build -ldflags="-s -w" -o $(BIN) $(CMD)
+	COMMIT=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+	BUILDTIME=$$(date -u +%Y-%m-%dT%H:%M:%SZ)
+	env $(GOENV) $(GO) build -ldflags="-s -w -X main.Version=0.3.0 -X main.GitCommit=$$COMMIT -X main.BuildTime=$$BUILDTIME" -o $(BIN) $(CMD)
 	@echo "✓ $(BIN) built"
 
 # ─── Frontend (Nuxt) ───────────────────────────────────────────────────
