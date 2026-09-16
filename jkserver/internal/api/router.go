@@ -23,6 +23,7 @@ import (
 	"jkrouter/jkserver/internal/oauth"
 	"jkrouter/jkserver/internal/providers/registry"
 	"jkrouter/jkserver/internal/proxypool"
+	"jkrouter/jkserver/internal/rtk"
 	"jkrouter/jkserver/internal/translator"
 )
 
@@ -137,6 +138,7 @@ func Router(d *db.DB, transReg *translator.Registry, ul *UsageLogger) chi.Router
 			log.Printf("[oauth] token refreshed for account %d (%s)", id, providerID)
 			return true
 		},
+		QuotaStore: rtk.New(24*time.Hour, 0), // 24h sliding window; 0 = no hard limit (soft warning only)
 	}
 
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -256,22 +258,26 @@ func Router(d *db.DB, transReg *translator.Registry, ul *UsageLogger) chi.Router
 func loadAccountStore(d *db.DB) *engine.AccountStore {
 	store := engine.NewAccountStore()
 	var rows []*struct {
-		ID          int64
-		ProviderID  string
-		Label       string
-		AuthType    string
-		EncKey      []byte
-		ProxyPoolID *int64
-		Priority    int
-		State       string
-		StrikeCount int
-		CooledUntil int64
-		ExpiresAt   int64
+		ID             int64
+		ProviderID     string
+		Label          string
+		AuthType       string
+		EncKey         []byte
+		ProxyPoolID    *int64
+		Priority       int
+		State          string
+		StrikeCount    int
+		CooledUntil    int64
+		ExpiresAt      int64
+		QuotaLimit     int
+		QuotaWindowSec int
+		QuotaResetAt   int64
 	}
 	d.EnqueueWriteSync(func(q *db.Queue) {
 		rs, err := q.DB().Query(`
 			SELECT id, provider_id, label, auth_type, encrypted_key, proxy_pool_id,
-			       priority, COALESCE(state,'active'), COALESCE(strike_count,0), COALESCE(cooled_until,0), COALESCE(expires_at,0)
+			       priority, COALESCE(state,'active'), COALESCE(strike_count,0), COALESCE(cooled_until,0), COALESCE(expires_at,0),
+			       COALESCE(quota_limit,0), COALESCE(quota_window_seconds,86400), COALESCE(quota_reset_at,0)
 			FROM accounts ORDER BY priority DESC, id`)
 		if err != nil {
 			return
@@ -279,19 +285,22 @@ func loadAccountStore(d *db.DB) *engine.AccountStore {
 		defer rs.Close()
 		for rs.Next() {
 			var r struct {
-				ID          int64
-				ProviderID  string
-				Label       string
-				AuthType    string
-				EncKey      []byte
-				ProxyPoolID *int64
-				Priority    int
-				State       string
-				StrikeCount int
-				CooledUntil int64
-				ExpiresAt   int64
+				ID             int64
+				ProviderID     string
+				Label          string
+				AuthType       string
+				EncKey         []byte
+				ProxyPoolID    *int64
+				Priority       int
+				State          string
+				StrikeCount    int
+				CooledUntil    int64
+				ExpiresAt      int64
+				QuotaLimit     int
+				QuotaWindowSec int
+				QuotaResetAt   int64
 			}
-			if err := rs.Scan(&r.ID, &r.ProviderID, &r.Label, &r.AuthType, &r.EncKey, &r.ProxyPoolID, &r.Priority, &r.State, &r.StrikeCount, &r.CooledUntil, &r.ExpiresAt); err != nil {
+			if err := rs.Scan(&r.ID, &r.ProviderID, &r.Label, &r.AuthType, &r.EncKey, &r.ProxyPoolID, &r.Priority, &r.State, &r.StrikeCount, &r.CooledUntil, &r.ExpiresAt, &r.QuotaLimit, &r.QuotaWindowSec, &r.QuotaResetAt); err != nil {
 				continue
 			}
 			rows = append(rows, &r)
@@ -312,17 +321,20 @@ func loadAccountStore(d *db.DB) *engine.AccountStore {
 			state = engine.StateDisabled
 		}
 		store.Upsert(&engine.Account{
-			ID:          r.ID,
-			ProviderID:  r.ProviderID,
-			Label:       r.Label,
-			AuthType:    r.AuthType,
-			APIKey:      keyPlain,
-			ProxyPoolID: r.ProxyPoolID,
-			Priority:    r.Priority,
-			State:       state,
-			StrikeCount: r.StrikeCount,
-			CooledUntil: time.Unix(r.CooledUntil, 0),
-			ExpiresAt:   time.Unix(r.ExpiresAt, 0),
+			ID:             r.ID,
+			ProviderID:     r.ProviderID,
+			Label:          r.Label,
+			AuthType:       r.AuthType,
+			APIKey:         keyPlain,
+			ProxyPoolID:    r.ProxyPoolID,
+			Priority:       r.Priority,
+			State:          state,
+			StrikeCount:    r.StrikeCount,
+			CooledUntil:    time.Unix(r.CooledUntil, 0),
+			ExpiresAt:      time.Unix(r.ExpiresAt, 0),
+			QuotaLimit:     r.QuotaLimit,
+			QuotaWindowSec: r.QuotaWindowSec,
+			QuotaResetAt:   r.QuotaResetAt,
 		})
 	}
 	return store

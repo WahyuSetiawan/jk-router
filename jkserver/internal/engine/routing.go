@@ -12,10 +12,12 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"jkrouter/jkserver/internal/executors"
 	"jkrouter/jkserver/internal/providers/registry"
+	"jkrouter/jkserver/internal/rtk"
 	"jkrouter/jkserver/internal/proxypool"
 	"jkrouter/jkserver/internal/translator"
 )
@@ -76,6 +78,8 @@ type RoutingConfig struct {
 	// and persist the new secret to the DB. Returns true if refresh succeeded.
 	RefreshOAuthToken func(id int64) bool
 	tokenRefreshAhead time.Duration
+	// QuotaStore tracks token usage per account (sliding window). nil = quota disabled.
+	QuotaStore *rtk.Saver
 }
 
 // DefaultRoutingConfig returns a config with sensible defaults.
@@ -100,7 +104,7 @@ func ExecuteRouting(body []byte, bearer string, stream bool, w http.ResponseWrit
 	requiredCaps := DetectRequiredCapabilities(body)
 	reqCapList := capsToList(requiredCaps) // convert map to slice for callers
 
-	candidates := buildCandidates(cfg, model, reqCapList)
+	candidates := buildCandidates(cfg, reqID, model, reqCapList)
 	if len(candidates) == 0 {
 		http.Error(w, fmt.Sprintf(`{"error":"no active accounts for model %q"}`, model), http.StatusServiceUnavailable)
 		return
@@ -150,6 +154,22 @@ func ExecuteRouting(body []byte, bearer string, stream bool, w http.ResponseWrit
 				log.Printf("[routing] req=%s fallback ok on %s/%s#%d", reqID, c.meta.ID, model, c.accountID)
 			}
 			logUsage(cfg, c, reqID, start, "success", nil)
+			// Record tokens for quota tracking (Sprint 5 P2).
+			if cfg.QuotaStore != nil && c.accountID > 0 {
+				inTokens := EstimateTokenCount(reqBody)
+				// Estimate output from response body size (rough: 1 token ≈ 4 bytes).
+				outTokens := len(bw.buf.Bytes()) / 4
+				cfg.QuotaStore.Record(strconv.FormatInt(c.accountID, 10), inTokens, outTokens)
+				// Check if over quota — if so, disable account.
+				a := cfg.AccountStore.Get(c.accountID)
+				if a != nil && a.QuotaLimit > 0 && cfg.QuotaStore.OverQuota(strconv.FormatInt(c.accountID, 10)) {
+					log.Printf("[routing] req=%s account %d over quota, disabling", reqID, c.accountID)
+					cfg.AccountStore.MarkDisabled(c.accountID)
+					if cfg.SaveStateFunc != nil {
+						cfg.SaveStateFunc(a.ID, string(a.State), a.StrikeCount, 0, a.UpdatedAtlas.Unix())
+					}
+				}
+			}
 			return
 		}
 
@@ -206,7 +226,7 @@ type routeCandidate struct {
 	poolID    *int64
 }
 
-func buildCandidates(cfg *RoutingConfig, requestedModel string, requiredCaps []Capability) []*routeCandidate {
+func buildCandidates(cfg *RoutingConfig, reqID string, requestedModel string, requiredCaps []Capability) []*routeCandidate {
 	combos := cfg.ComboStore.List()
 	accounts := cfg.AccountStore.GetAll()
 	var allCands []*routeCandidate
@@ -217,6 +237,10 @@ func buildCandidates(cfg *RoutingConfig, requestedModel string, requiredCaps []C
 			for _, aid := range combo.Accounts {
 				a := cfg.AccountStore.Get(aid)
 				if a == nil || a.State != StateActive {
+					continue
+				}
+				if cfg.QuotaStore != nil && a.QuotaLimit > 0 && cfg.QuotaStore.OverQuota(strconv.FormatInt(aid, 10)) {
+					log.Printf("[routing] req=%s account %d over quota, skipping", reqID, aid)
 					continue
 				}
 				for _, m := range combo.ModelIDs {
@@ -240,6 +264,9 @@ func buildCandidates(cfg *RoutingConfig, requestedModel string, requiredCaps []C
 	if len(allCands) == 0 {
 		for _, a := range accounts {
 			if a.State != StateActive {
+				continue
+			}
+			if cfg.QuotaStore != nil && a.QuotaLimit > 0 && cfg.QuotaStore.OverQuota(strconv.FormatInt(a.ID, 10)) {
 				continue
 			}
 			if meta := findMeta(cfg.Providers, a.ProviderID); meta != nil {

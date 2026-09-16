@@ -9,6 +9,7 @@
       <div class="nav-sec">Infrastructure</div>
       <NuxtLink to="/proxy-pools" class="nav-link" :class="{ active: route.path.startsWith('/proxy-pools') }">Proxy Pools</NuxtLink>
       <NuxtLink to="/usage" class="nav-link" :class="{ active: route.path.startsWith('/usage') }">Usage & Logs</NuxtLink>
+      <NuxtLink to="/quota" class="nav-link" :class="{ active: route.path.startsWith('/quota') }">Quota</NuxtLink>
       <div class="nav-sec">System</div>
       <NuxtLink to="/api-keys" class="nav-link" :class="{ active: route.path.startsWith('/api-keys') }">API Keys</NuxtLink>
       <NuxtLink to="/settings" class="nav-link" :class="{ active: route.path.startsWith('/settings') }">Settings</NuxtLink>

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -37,6 +38,8 @@ func DashboardRouter(d *db.DB) chi.Router {
 	r.Get("/connections", ListConnectionsHandler(d))
 	r.Post("/connections", CreateConnectionHandler(d))
 	r.Patch("/connections/{id}/toggle", ToggleConnectionHandler(d))
+	r.Get("/connections/{id}/quota", GetQuotaHandler(d))
+	r.Put("/connections/{id}/quota", UpdateQuotaHandler(d))
 
 	r.Get("/proxy-pools", ListProxyPoolsHandler(d))
 	r.Post("/proxy-pools", CreateProxyPoolHandler(d))
@@ -966,4 +969,44 @@ func maskKey(s string) string {
 		return "••••••••"
 	}
 	return s[:4] + "••••••••" + s[len(s)-2:]
+}
+
+// GetQuotaHandler returns quota status for an account (Sprint 5 P2).
+func GetQuotaHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		var quotaLimit, quotaWindowSec, quotaResetAt int64
+		err := d.QueryRow(`SELECT COALESCE(quota_limit,0), COALESCE(quota_window_seconds,86400), COALESCE(quota_reset_at,0) FROM accounts WHERE id=?`, id).Scan(&quotaLimit, &quotaWindowSec, &quotaResetAt)
+		if err != nil {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"quota_limit":%d,"quota_window_seconds":%d,"quota_reset_at":%d,"used":0}`, quotaLimit, quotaWindowSec, quotaResetAt)
+	}
+}
+
+// UpdateQuotaHandler updates quota settings for an account (Sprint 5 P2).
+func UpdateQuotaHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		var req struct {
+			QuotaLimit      int64 `json:"quota_limit"`
+			QuotaWindowSec  int64 `json:"quota_window_seconds"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+			return
+		}
+		if req.QuotaWindowSec <= 0 {
+			req.QuotaWindowSec = 86400
+		}
+		resetAt := time.Now().Unix() + req.QuotaWindowSec
+		d.EnqueueWriteSync(func(q *db.Queue) {
+			q.DB().Exec(`UPDATE accounts SET quota_limit=?, quota_window_seconds=?, quota_reset_at=? WHERE id=?`,
+				req.QuotaLimit, req.QuotaWindowSec, resetAt, id)
+		})
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"ok":true,"quota_limit":%d,"quota_window_seconds":%d,"quota_reset_at":%d}`, req.QuotaLimit, req.QuotaWindowSec, resetAt)
+	}
 }

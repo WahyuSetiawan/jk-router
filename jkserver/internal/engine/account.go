@@ -32,6 +32,11 @@ type Account struct {
 	CooledUntil  time.Time
 	ExpiresAt    time.Time // zero if none / api_key auth
 	UpdatedAtlas time.Time
+
+	// Quota fields (Sprint 5 P2). Zero = no limit.
+	QuotaLimit       int   // max tokens in window (0 = unlimited)
+	QuotaWindowSec   int   // sliding window in seconds (default 86400 = 24h)
+	QuotaResetAt     int64 // unix epoch when current window resets (0 = never)
 }
 
 // AccountStore manages in-memory account states with thread-safe access.
