@@ -39,7 +39,11 @@ function testStatusClass(p: any) {
   if (p.test_status === 'deactivated') return 'st disabled'
   return 'st cooling'
 }
-function testStatusText(p: any) { return p.test_status || 'idle' }
+function testStatusText(p: any) {
+  if (p.test_status === 'healthy') return 'active'
+  if (p.test_status === 'deactivated') return 'inactive'
+  return p.last_tested ? 'testing…' : 'idle'
+}
 onMounted(load)
 </script>
 <template>

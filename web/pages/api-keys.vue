@@ -59,21 +59,20 @@ onMounted(load)
 
     <div class="card">
       <table class="table">
-        <thead><tr><th>Name</th><th>Key</th><th>Last used</th><th>Requests</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Key</th><th>Created</th><th></th></tr></thead>
         <tbody>
           <tr v-for="k in keys" :key="k.id">
             <td class="font-medium">{{ k.label || '(no label)' }}</td>
             <td class="font-mono" style="font-size:.75rem;color:var(--jkr-yel)">{{ maskKey(k.key_display || '') }}</td>
-            <td style="color:var(--jkr-mut);font-size:.75rem">—</td>
-            <td style="color:var(--jkr-mut);font-size:.75rem">—</td>
+            <td style="color:var(--jkr-mut);font-size:.75rem">{{ k.created_at ? new Date(k.created_at * 1000).toLocaleDateString('id-ID') : '—' }}</td>
             <td style="text-align:right">
               <button
                 class="btn ghost btn-sm"
                 style="margin-right:.3rem"
                 :disabled="!!k.revoked"
-                @click="copyKey(k.id, k.key_display || '')"
+                @click="copyKey(k.id, k.key_hash || '')"
               >
-                {{ copied === k.id ? 'Copied!' : 'Copy' }}
+                {{ copied === k.id ? 'Copied!' : 'Copy Hash' }}
               </button>
               <button
                 class="btn-danger btn-sm"
@@ -84,7 +83,7 @@ onMounted(load)
               </button>
             </td>
           </tr>
-          <tr v-if="keys.length===0"><td colspan="5" class="note" style="text-align:center;padding:1rem">No API keys</td></tr>
+          <tr v-if="keys.length===0"><td colspan="4" class="note" style="text-align:center;padding:1rem">No API keys</td></tr>
         </tbody>
       </table>
     </div>

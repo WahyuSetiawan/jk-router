@@ -2,10 +2,17 @@
 package api
 
 import (
+	"compress/gzip"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +21,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"jkrouter/jkserver/internal/db"
+	"jkrouter/jkserver/internal/settings"
 )
 
 // AccountShort is a lightweight account representation for JSON responses.
@@ -34,8 +42,10 @@ type AccountShort struct {
 }
 
 // DashboardRouter mounts all /api/dashboard/* endpoints.
-func DashboardRouter(d *db.DB) chi.Router {
+// refreshFn is an optional callback for manual model refresh; nil skips the endpoint.
+func DashboardRouter(d *db.DB, refreshFn func()) chi.Router {
 	r := chi.NewRouter()
+	r.Use(RequireAuth(d))
 	r.Get("/providers", ListProvidersHandler(d))
 	r.Post("/providers", CreateProviderHandler(d))
 	r.Get("/providers/{id}", GetProviderHandler(d))
@@ -70,8 +80,13 @@ func DashboardRouter(d *db.DB) chi.Router {
 	r.Put("/settings", PutSettingsHandler(d))
 	r.Get("/auth/status", AuthStatusHandler(d))
 	r.Post("/auth/change-password", ChangePasswordHandler(d))
+	if refreshFn != nil {
+		r.Post("/providers/refresh-all", RefreshModelsHandler(refreshFn))
+	}
 	r.Get("/config/export", ExportConfigHandler(d))
 	r.Post("/config/import", ImportConfigHandler(d))
+	r.Get("/backups", GetBackupsHandler(d))
+	r.Post("/backups/restore", RestoreBackupHandler(d))
 
 	return r
 }
@@ -353,11 +368,12 @@ func ListConnectionsHandler(d *db.DB) http.HandlerFunc {
 func CreateConnectionHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			ProviderID string `json:"provider_id"`
-			Name       string `json:"name"`
-			Secret     string `json:"secret"`
-			AuthType   string `json:"auth_type"`
-			Priority   int    `json:"priority"`
+			ProviderID  string `json:"provider_id"`
+			Name        string `json:"name"`
+			Secret      string `json:"secret"`
+			AuthType    string `json:"auth_type"`
+			Priority    int    `json:"priority"`
+			ProxyPoolID *int64 `json:"proxy_pool_id"`
 		}
 		json.NewDecoder(r.Body).Decode(&req)
 		if req.ProviderID == "" || req.Name == "" {
@@ -388,8 +404,8 @@ func CreateConnectionHandler(d *db.DB) http.HandlerFunc {
 		var id int64
 		d.EnqueueWriteSync(func(q *db.Queue) {
 			res, e := q.DB().Exec(
-				`INSERT INTO accounts (provider_id, label, auth_type, encrypted_key, priority, state) VALUES (?, ?, ?, ?, ?, 'active')`,
-				req.ProviderID, req.Name, authType, encrypted, priority,
+				`INSERT INTO accounts (provider_id, label, auth_type, encrypted_key, priority, proxy_pool_id, state) VALUES (?, ?, ?, ?, ?, ?, 'active')`,
+				req.ProviderID, req.Name, authType, encrypted, priority, req.ProxyPoolID,
 			)
 			if e != nil {
 				http.Error(w, fmt.Sprintf(`{"error":"insert: %v"}`, e), 500)
@@ -668,7 +684,7 @@ func CostHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		_ = r
 		rows, err := d.Query(`
-			SELECT model, SUM(tok_in) as tin, SUM(tok_out) as tout, COUNT(*) as n
+			SELECT model, SUM(tok_in) as tin, SUM(tok_out) as tout, SUM(cost_usd) as total_cost, COUNT(*) as n
 			FROM usage_log
 			GROUP BY model
 			ORDER BY n DESC LIMIT 20
@@ -688,9 +704,7 @@ func CostHandler(d *db.DB) http.HandlerFunc {
 		var out []CostItem
 		for rows.Next() {
 			var ci CostItem
-			rows.Scan(&ci.Model, &ci.TokIn, &ci.TokOut, &ci.N)
-			pin, pout, _ := PricingQuery(d, ci.Model)
-			ci.Cost = CostForTokens(pin, pout, ci.TokIn, ci.TokOut)
+			rows.Scan(&ci.Model, &ci.TokIn, &ci.TokOut, &ci.Cost, &ci.N)
 			out = append(out, ci)
 		}
 		if out == nil {
@@ -711,18 +725,20 @@ func UsageStatsHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		_ = r
 		var total, success, errors, tokensIn int
-		var p95 int64
-		row := d.QueryRow("SELECT COUNT(*), COALESCE(SUM(CASE WHEN status='success' THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN status='error' OR status='fallback' THEN 1 ELSE 0 END),0), COALESCE(SUM(tok_in),0) FROM usage_log WHERE ts >= datetime('now', '-7 days')")
-		row.Scan(&total, &success, &errors, &tokensIn)
+		var tokensOut, avgMs int64
+		row := d.QueryRow("SELECT COUNT(*), COALESCE(SUM(CASE WHEN status='success' THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN status='error' OR status='fallback' THEN 1 ELSE 0 END),0), COALESCE(SUM(tok_in),0), COALESCE(SUM(tok_out),0), COALESCE(SUM(cost_usd),0) FROM usage_log WHERE ts >= datetime('now', '-7 days')")
+		var cost float64
+		row.Scan(&total, &success, &errors, &tokensIn, &tokensOut, &cost)
 		row2 := d.QueryRow("SELECT COALESCE(AVG(latency_ms),0) FROM usage_log WHERE ts >= datetime('now', '-7 days') AND status='success'")
-		row2.Scan(&p95)
+		row2.Scan(&avgMs)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"requests":  total,
 			"success":   success,
 			"errors":    errors,
 			"tokens_in": tokensIn,
-			"cost":      0.0,
-			"p95_ms":    p95,
+			"tokens_out": tokensOut,
+			"cost":      cost,
+			"avg_ms":    avgMs,
 		})
 	}
 }
@@ -756,6 +772,9 @@ func GetSettingsHandler(d *db.DB) http.HandlerFunc {
 		if v := sv("cooldown_429"); v != "" {
 			settings["cooldown_429"] = v
 		}
+		if v := sv("circuit_breaker"); v != "" {
+			settings["circuitBreaker"] = v
+		}
 		// Capacity adapter settings (JSON blob)
 		if v := sv("capacity_adapter"); v != "" {
 			settings["capacityAdapter"] = v
@@ -774,6 +793,7 @@ func PutSettingsHandler(d *db.DB) http.HandlerFunc {
 			LogBuffer      string      `json:"logBuffer"`
 			WalInterval    string      `json:"walInterval"`
 			Cooldown429    string      `json:"cooldown429"`
+		CircuitBreaker string      `json:"circuitBreaker"`
 			CapacityAdapter json.RawMessage `json:"capacityAdapter"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -792,10 +812,117 @@ func PutSettingsHandler(d *db.DB) http.HandlerFunc {
 		set("log_buffer", body.LogBuffer)
 		set("wal_interval", body.WalInterval)
 		set("cooldown_429", body.Cooldown429)
+		if body.CircuitBreaker != "" {
+			d.Exec("INSERT OR REPLACE INTO settings_kv (key, value) VALUES (?, ?)", "circuit_breaker", body.CircuitBreaker)
+		}
 		if len(body.CapacityAdapter) > 0 {
 			d.Exec("INSERT OR REPLACE INTO settings_kv (key, value) VALUES (?, ?)", "capacity_adapter", string(body.CapacityAdapter))
 		}
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}
+}
+
+// GetBackupsHandler lists available DB backup files.
+type BackupEntry struct {
+	Filename string `json:"filename"`
+	Size     int64  `json:"size"`
+	ModTime  string `json:"mod_time"`
+	SHA256   string `json:"sha256"`
+}
+
+func GetBackupsHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		dataDir := settings.GetDataDir()
+		backupDir := settings.BackupDir(dataDir)
+		files, err := filepath.Glob(filepath.Join(backupDir, "jkrouter-*.bak.gz"))
+		if err != nil {
+			http.Error(w, `{"error":"glob backups"}`, 500)
+			return
+		}
+		sort.Strings(files)
+		var list []BackupEntry
+		for _, f := range files {
+			fi, _ := os.Stat(f)
+			data, _ := os.ReadFile(f)
+			h := sha256.Sum256(data)
+			list = append(list, BackupEntry{
+				Filename: filepath.Base(f),
+				Size:     fi.Size(),
+				ModTime:  fi.ModTime().Format(time.RFC3339),
+				SHA256:   hex.EncodeToString(h[:]),
+			})
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"backups": list})
+	}
+}
+
+// RestoreBackupHandler restores from a backup .bak.gz file.
+func RestoreBackupHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Filename string `json:"filename"`
+			SHA256   string `json:"sha256"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, `{"error":"decode"}`, 400)
+			return
+		}
+		dataDir := settings.GetDataDir()
+		backupDir := settings.BackupDir(dataDir)
+		filePath := filepath.Join(backupDir, body.Filename)
+		// Security: only allow files in backup dir matching known prefix.
+		if !strings.HasPrefix(body.Filename, "jkrouter-") || !strings.HasSuffix(body.Filename, ".bak.gz") {
+			http.Error(w, `{"error":"invalid filename"}`, 400)
+			return
+		}
+		fi, err := os.Stat(filePath)
+		if err != nil || fi.Size() < 10 {
+			http.Error(w, `{"error":"backup not found"}`, 404)
+			return
+		}
+		// Verify SHA-256 if provided.
+		if body.SHA256 != "" {
+			data, _ := os.ReadFile(filePath)
+			h := sha256.Sum256(data)
+			if hex.EncodeToString(h[:]) != body.SHA256 {
+				http.Error(w, `{"error":"sha256 mismatch"}`, 400)
+				return
+			}
+		}
+		// Decompress .gz to temp path.
+		gzFile, err := os.Open(filePath)
+		if err != nil {
+			http.Error(w, `{"error":"open backup"}`, 500)
+			return
+		}
+		defer gzFile.Close()
+		gr, err := gzip.NewReader(gzFile)
+		if err != nil {
+			http.Error(w, `{"error":"gzip reader"}`, 500)
+			return
+		}
+		tmpPath := filepath.Join(filepath.Dir(settings.DBPath(dataDir)), ".jkrouter-restoring.db")
+		tmpFile, err := os.Create(tmpPath)
+		if err != nil {
+			http.Error(w, `{"error":"create temp"}`, 500)
+			return
+		}
+		if _, err := io.Copy(tmpFile, gr); err != nil {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			http.Error(w, `{"error":"decompress"}`, 500)
+			return
+		}
+		gr.Close()
+		tmpFile.Close()
+		// Atomic rename over current DB.
+		dbPath := settings.DBPath(dataDir)
+		if err := os.Rename(tmpPath, dbPath); err != nil {
+			os.Remove(tmpPath)
+			http.Error(w, `{"error":"rename db"}`, 500)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "restored", "file": body.Filename})
 	}
 }
 
@@ -969,8 +1096,19 @@ func BootstrapKeyHandler(d *db.DB) http.HandlerFunc {
 			return
 		}
 		masked := maskKey(keyHash)
+		// Return plain key only if never shown before.
+		var shown string
+		d.QueryRow("SELECT value FROM settings_kv WHERE key='bootstrap_key_shown'").Scan(&shown)
+		keyPlain := ""
+		if shown != "1" {
+			// First access: decrypt and return plain key, then mark as shown.
+			if plain, err2 := db.DecryptSecret(keyHash); err2 == nil {
+				keyPlain = plain
+			}
+			d.Exec("INSERT OR REPLACE INTO settings_kv (key, value) VALUES ('bootstrap_key_shown', '1')")
+		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"id":"%d","key":"%s","key_display":"%s"}`, id, masked, masked)
+		fmt.Fprintf(w, `{"id":%d,"key":"%s","key_display":"%s"}`, id, keyPlain, masked)
 	}
 }
 
@@ -979,6 +1117,15 @@ func maskKey(s string) string {
 		return "••••••••"
 	}
 	return s[:4] + "••••••••" + s[len(s)-2:]
+}
+
+// RefreshModelsHandler triggers a manual model refresh across all providers.
+func RefreshModelsHandler(refreshFn func()) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		go refreshFn()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"ok": "refreshing"})
+	}
 }
 
 // GetQuotaHandler returns quota status for an account (Sprint 5 P2).

@@ -5,6 +5,13 @@ const saving = ref(false)
 const msg = ref('')
 const msgType = ref<'ok' | 'err'>('ok')
 const rtkStatus = ref<{ enabled: boolean; windowSec: number; saved: number }>({ enabled: true, windowSec: 86400, saved: 0 })
+const walInterval = ref(300)   // seconds
+const logBuffer = ref(4096)     // entries
+const cooldown429 = ref(60)     // seconds
+const circuitBreaker = ref(5)   // consecutive failures
+const backups = ref<{filename:string,size:number,mod_time:string,sha256:string}[]>([])
+const restoring = ref(false)
+const restoringFile = ref('')
 
 // Capacity adapter: { vision: "model-id", pdf: "", ... } or null
 const capAdapter = ref<Record<string, string>>({})
@@ -23,7 +30,38 @@ async function load() {
     if (r.settings?.rtkWindowSec) {
       rtkStatus.value.windowSec = r.settings.rtkWindowSec
     }
+    if (r.settings?.wal_interval) walInterval.value = parseInt(r.settings.wal_interval) || 300
+    if (r.settings?.log_buffer) logBuffer.value = parseInt(r.settings.log_buffer) || 4096
+    if (r.settings?.cooldown_429) cooldown429.value = parseInt(r.settings.cooldown_429) || 60
+    loadBackups()
   } catch { /* use defaults */ }
+}
+async function loadBackups() {
+  try {
+    const r = await fetch('/api/dashboard/backups').then(x => x.json())
+    backups.value = r.backups || []
+  } catch { /* ignore */ }
+}
+async function doRestore(b: typeof backups.value[0]) {
+  if (!confirm(`Restore from ${b.filename}? This will replace the current database.`)) return
+  restoring.value = true
+  restoringFile.value = b.filename
+  msg.value = ''
+  try {
+    await fetch('/api/dashboard/backups/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: b.filename, sha256: b.sha256 })
+    })
+    msg.value = `Restored from ${b.filename}`
+    msgType.value = 'ok'
+    await loadBackups()
+  } catch (e: any) {
+    msg.value = 'Restore failed: ' + (e.message || 'unknown')
+    msgType.value = 'err'
+  } finally {
+    restoring.value = false
+    restoringFile.value = ''
+  }
 }
 async function save() {
   saving.value = true
@@ -35,6 +73,10 @@ async function save() {
     } else {
       payload.capacityAdapter = ''
     }
+    payload.walInterval = String(walInterval.value)
+    payload.logBuffer = String(logBuffer.value)
+    payload.cooldown429 = String(cooldown429.value)
+    payload.circuitBreaker = String(circuitBreaker.value)
     await fetch('/api/dashboard/settings', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -140,16 +182,42 @@ onMounted(load)
         </dd>
       </div>
       <p class="note" style="font-size:.75rem;margin-top:.3rem">Export/import portable config (providers, combos, pools, keys). Does not include usage logs.</p>
+      <div v-if="backups.length" style="margin-top:.6rem;border-top:1px solid var(--jkr-brd);padding-top:.5rem">
+        <p class="note" style="font-size:.8rem;margin-bottom:.3rem">DB snapshots (auto before each migration, max 10)</p>
+        <table style="width:100%;font-size:.8rem;border-collapse:collapse">
+          <tr style="color:var(--jkr-fg-muted)"><th style="text-align:left;padding:.2rem 0">File</th><th>Size</th><th>Time</th><th></th></tr>
+          <tr v-for="b in backups" :key="b.filename" style="border-top:1px solid var(--jkr-brd)">
+            <td style="padding:.25rem 0"><code style="font-size:.75rem">{{ b.filename }}</code></td>
+            <td class="note">{{ (b.size/1024).toFixed(0) }} KB</td>
+            <td class="note">{{ new Date(b.mod_time).toLocaleString() }}</td>
+            <td><button class="btn ghost btn-sm" :disabled="restoring" @click="doRestore(b)" style="font-size:.7rem">restore</button></td>
+          </tr>
+        </table>
+        <p v-if="restoring" class="note" style="font-size:.75rem;margin-top:.3rem;color:var(--jkr-yellow)">Restoring {{ restoringFile }}… do not restart server.</p>
+      </div>
+      <p v-else class="note" style="font-size:.75rem;margin-top:.3rem">No snapshots yet — first backup created before next migration.</p>
     </div>
 
     <!-- Resilience Defaults -->
     <div class="card" style="margin-bottom:.8rem">
       <h3 style="color:var(--jkr-lav);font-size:.95rem">Resilience Defaults</h3>
       <div class="kv">
-        <dt>Cooldown (429)</dt><dd class="note" style="font-size:.8rem">60s default when Retry-After header absent</dd>
-        <dt>Circuit Breaker</dt><dd class="note" style="font-size:.8rem">Auto-disable account after 5 consecutive failures</dd>
-        <dt>WAL checkpoint</dt><dd class="note" style="font-size:.8rem">5m interval to flush SQLite WAL</dd>
-        <dt>Log channel</dt><dd class="note" style="font-size:.8rem">4096 buffer; drops oldest + increments counter when full</dd>
+        <dt>Cooldown (429)</dt><dd>
+          <input type="number" class="input" style="width:80px" :value="cooldown429" @change="cooldown429 = parseInt(($event.target as HTMLInputElement).value) || 60" />
+          <span class="note" style="font-size:.75rem;margin-left:.3rem">detik (saat Retry-After tidak ada)</span>
+        </dd>
+        <dt>Circuit Breaker</dt><dd>
+          <input type="number" class="input" style="width:80px" :value="circuitBreaker" @change="circuitBreaker = parseInt(($event.target as HTMLInputElement).value) || 5" />
+          <span class="note" style="font-size:.75rem;margin-left:.3rem">kegagalan berturut-tut untuk disable akun</span>
+        </dd>
+        <dt>WAL checkpoint</dt><dd>
+          <input type="number" class="input" style="width:80px" :value="walInterval" @change="walInterval = parseInt(($event.target as HTMLInputElement).value) || 300" />
+          <span class="note" style="font-size:.75rem;margin-left:.3rem">detik</span>
+        </dd>
+        <dt>Log buffer</dt><dd>
+          <input type="number" class="input" style="width:80px" :value="logBuffer" @change="logBuffer = parseInt(($event.target as HTMLInputElement).value) || 4096" />
+          <span class="note" style="font-size:.75rem;margin-left:.3rem">entri</span>
+        </dd>
         <dt>Stream guard</dt><dd class="note" style="font-size:.8rem">Atomic bool prevents concurrent writes during streaming</dd>
       </div>
     </div>

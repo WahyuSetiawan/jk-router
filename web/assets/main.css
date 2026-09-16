@@ -14,8 +14,16 @@
   --jkr-yel: #f9e2af;
   --jkr-red: #f38ba8;
   --jkr-txt: #cdd6f4;
+  --jkr-text: var(--jkr-txt);
   --jkr-mut: #9399b2;
+  --jkr-text-muted: var(--jkr-mut);
+  --jkr-fg-muted: var(--jkr-mut);
   --jkr-brd: #45475a;
+  --jkr-surface2: var(--jkr-s0);
+  --jkr-emerald: var(--jkr-grn);
+  --jkr-yellow: var(--jkr-yel);
+  --jkr-floo: var(--jkr-txt);
+  --jkr-radius: 8px;
 }
 
 /* Utility classes matching wireframe */
@@ -54,6 +62,7 @@ pre { background: var(--jkr-crust); border: 1px solid var(--jkr-brd); border-rad
 .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: .8rem; }
 .stat-card .n { font-size: 1.5rem; color: var(--jkr-blue); font-weight: 700; }
 .stat-card .l { font-size: .65rem; color: var(--jkr-mut); text-transform: uppercase; letter-spacing: .08em; }
+.stat-val { color: var(--jkr-floo); font-size: 1.4rem; font-weight: 600; margin-top: .2rem; }
 .table { width: 100%; border-collapse: collapse; font-size: .8rem; }
 .table th { text-align: left; color: var(--jkr-mut); font-weight: 400; border-bottom: 1px solid var(--jkr-brd); padding: .4rem .3rem; font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; }
 .table td { padding: .45rem .3rem; border-bottom: 1px solid #31324480; }

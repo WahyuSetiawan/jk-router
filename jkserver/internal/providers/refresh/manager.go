@@ -74,6 +74,11 @@ func (m *Manager) run() {
 	}
 }
 
+// RefreshAll triggers an immediate model refresh across all providers.
+func (m *Manager) RefreshAll() {
+	m.refreshAll()
+}
+
 func (m *Manager) refreshAll() {
 	regs := registry.GetRegistries()
 	for _, reg := range regs {

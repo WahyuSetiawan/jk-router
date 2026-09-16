@@ -156,7 +156,10 @@ func runServer(dataDir string, port int) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","ts":"%s"}`, time.Now().Format(time.RFC3339))
 	})
-	r.Mount("/api/dashboard", api.DashboardRouter(d))
+	// Auth endpoints are OUTSIDE middleware (login/logout).
+	r.Post("/api/dashboard/auth/login", api.LoginHandler(d))
+	r.Post("/api/dashboard/auth/logout", api.LogoutHandler())
+	r.Mount("/api/dashboard", api.DashboardRouter(d, refMgr.RefreshAll))
 
 	r.Handle("/dashboard/*", http.StripPrefix("/dashboard/", http.FileServer(http.FS(webFS))))
 

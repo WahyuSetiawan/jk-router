@@ -8,12 +8,12 @@ async function load() {
   try {
     const [u, c] = await Promise.all([
       fetch('/api/dashboard/usage?limit=20').then(r => r.json()),
-      fetch('/api/dashboard/usage/stats').then(r => r.json()).catch(() => ({ requests: 0, tokens_in: 0, cost: 0, p95_ms: 0 })),
+      fetch('/api/dashboard/usage/stats').then(r => r.json()).catch(() => ({ requests: 0, tokens_in: 0, cost: 0, avg_ms: 0 })),
     ])
     const list = u.usage || []
     recent.value = list
     if (c.requests !== undefined) {
-      stats.value = { requests: c.requests, tokensIn: c.tokens_in, cost: c.cost, p95Latency: c.p95_ms }
+      stats.value = { requests: c.requests, tokensIn: c.tokens_in, cost: c.cost, p95Latency: c.avg_ms }
     } else {
       // Fallback: compute from raw data
       const success = list.filter(x => x.status === 'success')
@@ -32,16 +32,16 @@ onMounted(load)
 </script>
 <template>
   <div>
-    <h2 class="text-xl font-bold mb-4" style="color:var(--jkr-txt)">Dashboard</h2>
+    <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin-bottom:1rem">Dashboard</h2>
     <div v-if="loading" class="note" style="padding:2rem;text-align:center">Loading…</div>
     <template v-else>
-      <div class="grid4 mb-6">
+      <div class="grid4" style="margin-bottom:1rem">
         <div class="card stat-card"><div class="n">{{ stats.requests }}</div><div class="l">requests</div></div>
         <div class="card stat-card"><div class="n">{{ stats.tokensIn.toLocaleString() }}</div><div class="l">tokens in</div></div>
         <div class="card stat-card"><div class="n">${{ typeof stats.cost === 'number' ? stats.cost.toFixed(4) : stats.cost }}</div><div class="l">est. cost</div></div>
-        <div class="card stat-card"><div class="n">{{ stats.p95Latency }}ms</div><div class="l">p95 latency</div></div>
+        <div class="card stat-card"><div class="n">{{ stats.p95Latency }}ms</div><div class="l">avg latency</div></div>
       </div>
-      <div class="card">
+      <div class="card" style="margin-top:.5rem">
         <h3>Recent Requests</h3>
         <table class="table">
           <thead><tr>

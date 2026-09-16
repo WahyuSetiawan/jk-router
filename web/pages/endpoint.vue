@@ -8,7 +8,8 @@ const getPort = () => {
 const port = getPort()
 const baseUrl = `http://localhost:${port}`
 const v1Url = `${baseUrl}/v1`
-const apiInfo = ref({ key: '', keyFull: '' })
+const apiInfo = ref({ key: '', keyFull: '', isNew: false })
+const showWarning = ref(false)
 
 async function copy(text: string, btn: HTMLElement) {
   await navigator.clipboard.writeText(text)
@@ -20,20 +21,31 @@ async function copy(text: string, btn: HTMLElement) {
 onMounted(async () => {
   try {
     const r = await fetch('/api/dashboard/bootstrap-key').then(x => x.json()).catch(() => ({}))
-    if (r.key) apiInfo.value.keyFull = r.key
+    // key is plain text on first access (isNew=true), otherwise masked
+    if (r.key) {
+      apiInfo.value.keyFull = r.key
+      apiInfo.value.isNew = r.is_new === true
+    }
+    if (apiInfo.value.keyFull) {
+      const k = apiInfo.value.keyFull
+      apiInfo.value.key = k.slice(0, 4) + '••••••••' + k.slice(-2)
+    } else {
+      apiInfo.value.key = 'jk_••••••••'
+    }
+    // Show warning if key was just revealed for the first time
+    showWarning.value = apiInfo.value.isNew
   } catch { /* placeholder */ }
-  if (apiInfo.value.keyFull) {
-    const k = apiInfo.value.keyFull
-    apiInfo.value.key = k.slice(0, 4) + '••••••••' + k.slice(-2)
-  } else {
-    apiInfo.value.key = 'jk_••••••••'
-  }
 })
 </script>
 <template>
   <div>
     <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin-bottom:1rem">Endpoint</h2>
     <p class="note" style="margin-bottom:1rem">Info copy-paste untuk AI CLI tools.</p>
+
+    <!-- First-time warning -->
+    <div v-if="showWarning" class="card" style="margin-bottom:1rem;border:1px solid var(--jkr-red);background:rgba(180,81,81,0.08)">
+      <p style="color:var(--jkr-red);margin:0;font-size:.85rem">⚠️ Key ini hanya tampil SEKALI. Salin dan simpan sekarang — setelah ditutup tidak akan muncul lagi.</p>
+    </div>
 
     <div class="card">
       <h3>OpenAI-compatible</h3>

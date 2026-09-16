@@ -39,6 +39,7 @@ type UsageEntry struct {
 	TokOut       int
 	LatencyMs    int
 	Status       string // success | error | fallback
+	CostUSD      float64
 	AdapterUsed  int
 }
 
@@ -47,12 +48,19 @@ func (ul *UsageLogger) LogRequest(entry UsageEntry) {
 	if ul.db == nil {
 		return
 	}
+	costUSD := 0.0
+	if entry.Model != "" {
+		if pin, pout, err := PricingQuery(ul.db, entry.Model); err == nil {
+			costUSD = CostForTokens(pin, pout, entry.TokIn, entry.TokOut)
+		}
+	}
+	entry.CostUSD = costUSD
 	ts := time.Now().Format("2006-01-02 15:04:05")
 	ul.db.EnqueueWriteSync(func(q *db.Queue) {
 		_, err := q.DB().Exec(
 			`INSERT INTO usage_log (request_id, combo, model, provider, account_id, fallback_from,
-			   state_at_start, tok_in, tok_out, latency_ms, status, adapter_used, ts)
-			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			   state_at_start, tok_in, tok_out, latency_ms, status, adapter_used, cost_usd, ts)
+			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			entry.RequestID,
 			entry.Combo,
 			entry.Model,
@@ -64,6 +72,7 @@ func (ul *UsageLogger) LogRequest(entry UsageEntry) {
 			entry.TokOut,
 			entry.LatencyMs,
 			entry.Status,
+			costUSD,
 			entry.AdapterUsed,
 			ts,
 		)
@@ -129,7 +138,7 @@ func UsageHandler(d *db.DB) http.HandlerFunc {
 		model    := r.URL.Query().Get("model")
 		date     := r.URL.Query().Get("date")
 
-		q := `SELECT request_id, combo, model, provider, status, latency_ms, tok_in, tok_out, adapter_used, ts
+		q := `SELECT request_id, combo, model, provider, status, latency_ms, tok_in, tok_out, adapter_used, cost_usd, ts
 		      FROM usage_log WHERE 1=1`
 		args := []interface{}{}
 		if provider != "" {
@@ -162,13 +171,14 @@ func UsageHandler(d *db.DB) http.HandlerFunc {
 			LatencyMs   int    `json:"latency_ms"`
 			TokIn       int    `json:"tok_in"`
 			TokOut      int    `json:"tok_out"`
-			AdapterUsed int    `json:"adapter_used"`
-			TS          string `json:"ts"`
+			AdapterUsed int     `json:"adapter_used"`
+			CostUSD   float64 `json:"cost_usd"`
+			TS        string  `json:"ts"`
 		}
 		var out []URow
 		for rows.Next() {
 			var u URow
-			if err := rows.Scan(&u.RequestID, &u.Combo, &u.Model, &u.Provider, &u.Status, &u.LatencyMs, &u.TokIn, &u.TokOut, &u.AdapterUsed, &u.TS); err != nil {
+			if err := rows.Scan(&u.RequestID, &u.Combo, &u.Model, &u.Provider, &u.Status, &u.LatencyMs, &u.TokIn, &u.TokOut, &u.AdapterUsed, &u.CostUSD, &u.TS); err != nil {
 				continue
 			}
 			out = append(out, u)
@@ -205,13 +215,14 @@ func UsageTailHandler(d *db.DB) http.HandlerFunc {
 				n = 50
 			}
 		}
-		rows, err := d.Query(`SELECT ts, request_id, combo, model, provider, status, latency_ms, tok_in, tok_out FROM usage_log ORDER BY ts DESC LIMIT ?`, n)
+		rows, err := d.Query(`SELECT ts, request_id, combo, model, provider, status, latency_ms, tok_in, tok_out, cost_usd FROM usage_log ORDER BY ts DESC LIMIT ?`, n)
 		if err != nil {
 			http.Error(w, `{"error":"query failed"}`, http.StatusInternalServerError)
 			return
 		}
 		defer rows.Close()
 		type Item struct {
+			CostUSD float64 `json:"cost_usd"`
 			TS        string `json:"ts"`
 			RequestID string `json:"request_id"`
 			Combo     string `json:"combo"`
@@ -225,7 +236,7 @@ func UsageTailHandler(d *db.DB) http.HandlerFunc {
 		var out []Item
 		for rows.Next() {
 			var it Item
-			if err := rows.Scan(&it.TS, &it.RequestID, &it.Combo, &it.Model, &it.Provider, &it.Status, &it.LatencyMs, &it.TokIn, &it.TokOut); err != nil {
+			if err := rows.Scan(&it.TS, &it.RequestID, &it.Combo, &it.Model, &it.Provider, &it.Status, &it.LatencyMs, &it.TokIn, &it.TokOut, &it.CostUSD); err != nil {
 				continue
 			}
 			out = append(out, it)

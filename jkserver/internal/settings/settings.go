@@ -9,8 +9,12 @@ import (
 // DefaultPort is the dashboard + API port (PRD §10.1: same as 9Router).
 const DefaultPort = 20128
 
-// DefaultDataDir is ~/.jkrouter (can be overridden by DATA_DIR env or --data-dir flag).
 func DefaultDataDir() string {
+	return GetDataDir()
+}
+
+// GetDataDir returns the configured data directory from env or home.
+func GetDataDir() string {
 	if v := os.Getenv("DATA_DIR"); v != "" {
 		return v
 	}
