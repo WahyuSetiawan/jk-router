@@ -68,3 +68,4 @@ logs/
 *.temp
 *.bak
 scratch/
+jkserver/internal/db/test.db
