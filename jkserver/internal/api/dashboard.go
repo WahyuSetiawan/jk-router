@@ -48,6 +48,7 @@ func DashboardRouter(d *db.DB) chi.Router {
 	r.Get("/api-keys", ListAPIKeysHandler(d))
 	r.Post("/api-keys", CreateAPIKeyHandler(d))
 	r.Post("/api-keys/{id}/revoke", RevokeAPIKeyHandler(d))
+	r.Get("/bootstrap-key", BootstrapKeyHandler(d))
 
 	r.Get("/usage", UsageHandler(d))
 	r.Post("/usage/tail", UsageTailHandler(d))
@@ -592,6 +593,7 @@ func ListAPIKeysHandler(d *db.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 		type K struct {
+		KeyDisplay string `json:"key_display"`
 			ID        int64  `json:"id"`
 			KeyHash   string `json:"key_hash"`
 			Label     string `json:"label"`
@@ -602,6 +604,7 @@ func ListAPIKeysHandler(d *db.DB) http.HandlerFunc {
 		for rows.Next() {
 			var k K
 			rows.Scan(&k.ID, &k.KeyHash, &k.Label, &k.Revoked, &k.CreatedAt)
+			k.KeyDisplay = maskKey(k.KeyHash)
 			out = append(out, k)
 		}
 		if out == nil {
@@ -627,7 +630,8 @@ func CreateAPIKeyHandler(d *db.DB) http.HandlerFunc {
 			)
 		})
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"id":"%s","key":"%s"}`, key[:12]+"...", key)
+		masked := maskKey(key)
+		fmt.Fprintf(w, `{"id":"%s","key":"%s","key_display":"%s"}`, key[:12]+"...", key, masked)
 	}
 }
 
@@ -919,4 +923,31 @@ func sha256Hash(pw string) string {
 func sha256Check(pw, hash string) bool {
 	computed := sha256.Sum256([]byte(pw))
 	return fmt.Sprintf("%x", computed) == hash
+}
+
+// maskKey shows first 4 and last 2 chars with dots in between.
+// BootstrapKeyHandler returns the first active api key (for endpoint.vue).
+func BootstrapKeyHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_ = r
+		var id int64
+		var keyHash, label string
+		row := d.QueryRow(`SELECT id, key_hash, COALESCE(label, '') FROM api_keys WHERE revoked=0 ORDER BY created_at ASC LIMIT 1`)
+		err := row.Scan(&id, &keyHash, &label)
+		if err != nil || id == 0 {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"key":""}`)
+			return
+		}
+		masked := maskKey(keyHash)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"id":"%d","key":"%s","key_display":"%s"}`, id, masked, masked)
+	}
+}
+
+func maskKey(s string) string {
+	if len(s) < 8 {
+		return "••••••••"
+	}
+	return s[:4] + "••••••••" + s[len(s)-2:]
 }

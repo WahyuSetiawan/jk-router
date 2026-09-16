@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 
-// Copy endpoint info to clipboard
+const getPort = () => {
+  if (typeof window !== 'undefined') return window.location.port || '20128'
+  return '20128'
+}
+const port = getPort()
+const baseUrl = `http://localhost:${port}`
+const v1Url = `${baseUrl}/v1`
+const apiInfo = ref({ key: '', keyFull: '' })
+
 async function copy(text: string, btn: HTMLElement) {
   await navigator.clipboard.writeText(text)
   const orig = btn.textContent
@@ -9,22 +17,17 @@ async function copy(text: string, btn: HTMLElement) {
   setTimeout(() => { btn.textContent = orig }, 1500)
 }
 
-const port = 20128
-const baseUrl = `http://localhost:${port}`
-const v1Url = `${baseUrl}/v1`
-
-// Placeholder key — real one comes from /api/dashboard/health
-const apiInfo = ref({ key: 'jk_r3_••••••••', keyFull: '' })
-
 onMounted(async () => {
   try {
-    const r = await fetch('/api/dashboard/health').then(x => x.json())
-    if (r.api_key) apiInfo.value.keyFull = r.api_key
-  } catch { /* use placeholder */ }
-  // Derive masked key from placeholder
-  apiInfo.value.key = apiInfo.value.keyFull
-    ? apiInfo.value.keyFull.slice(0, 8) + '••••' + apiInfo.value.keyFull.slice(-4)
-    : 'jk_r3_••••••••d7'
+    const r = await fetch('/api/dashboard/bootstrap-key').then(x => x.json()).catch(() => ({}))
+    if (r.key) apiInfo.value.keyFull = r.key
+  } catch { /* placeholder */ }
+  if (apiInfo.value.keyFull) {
+    const k = apiInfo.value.keyFull
+    apiInfo.value.key = k.slice(0, 4) + '••••••••' + k.slice(-2)
+  } else {
+    apiInfo.value.key = 'jk_••••••••'
+  }
 })
 </script>
 <template>
@@ -43,23 +46,23 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div class="row">
+    <div class="row" style="gap:1rem;margin-top:1rem">
       <div class="card" style="flex:1;margin-bottom:0">
         <h3>Claude Code</h3>
         <pre>ANTHROPIC_BASE_URL={{ baseUrl }}
-ANTHROPIC_API_KEY={{ apiInfo.keyFull || 'jk_r3_••••••••d7' }}
+ANTHROPIC_API_KEY={{ apiInfo.keyFull || 'jk_••••••••' }}
 ANTHROPIC_MODEL=kr/claude-sonnet-4.5</pre>
       </div>
       <div class="card" style="flex:1;margin-bottom:0">
         <h3>Cursor / OpenClaw</h3>
         <pre>{ "endpoint": "{{ v1Url }}",
-  "apiKey": "{{ apiInfo.keyFull || 'jk_r3_••••••••d7' }}",
+  "apiKey": "{{ apiInfo.keyFull || 'jk_••••••••' }}",
   "model": "kr/gemini-2.5-flash-lite" }</pre>
       </div>
       <div class="card" style="flex:1;margin-bottom:0">
         <h3>curl smoke test</h3>
         <pre>curl -s {{ baseUrl }}/v1/chat/completions \
-  -H "Authorization: Bearer {{ apiInfo.keyFull || 'jk_r3_••••••••d7' }}" \
+  -H "Authorization: Bearer {{ apiInfo.keyFull || 'jk_••••••••' }}" \
   -d '{"model":"kr/claude-sonnet-4.5","messages":[{"role":"user","content":"ping"}],"stream":true}'</pre>
       </div>
     </div>
