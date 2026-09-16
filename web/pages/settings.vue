@@ -4,6 +4,7 @@ const settings = ref({ port: 20128, bind: '127.0.0.1', dataDir: '~/.jkrouter' })
 const saving = ref(false)
 const msg = ref('')
 const msgType = ref<'ok' | 'err'>('ok')
+const rtkStatus = ref<{ enabled: boolean; windowSec: number; saved: number }>({ enabled: true, windowSec: 86400, saved: 0 })
 
 // Capacity adapter: { vision: "model-id", pdf: "", ... } or null
 const capAdapter = ref<Record<string, string>>({})
@@ -15,6 +16,13 @@ async function load() {
     if (r.settings?.capacityAdapter) {
       try { capAdapter.value = JSON.parse(r.settings.capacityAdapter) } catch { /* ignore */ }
     }
+    // Load RTK status from settings
+    if (r.settings?.rtkEnabled !== undefined) {
+      rtkStatus.value.enabled = r.settings.rtkEnabled
+    }
+    if (r.settings?.rtkWindowSec) {
+      rtkStatus.value.windowSec = r.settings.rtkWindowSec
+    }
   } catch { /* use defaults */ }
 }
 async function save() {
@@ -22,7 +30,6 @@ async function save() {
   msg.value = ''
   try {
     const payload: Record<string, unknown> = { ...settings.value }
-    // Convert capAdapter object → JSON string for backend
     if (Object.keys(capAdapter.value).length > 0) {
       payload.capacityAdapter = JSON.stringify(capAdapter.value)
     } else {
@@ -91,15 +98,23 @@ function setCap(key: string, model: string) {
   }
 }
 
+function formatWindow(sec: number): string {
+  if (sec >= 86400) return `${sec / 86400} hari`
+  if (sec >= 3600) return `${sec / 3600} jam`
+  return `${sec / 60} menit`
+}
+
 onMounted(load)
 </script>
 <template>
   <div>
     <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin-bottom:1rem">Settings</h2>
       <div v-if="msg" :style="{color: msgType==='ok' ? 'var(--jkr-grn)' : 'var(--jkr-red)', marginBottom: '1rem'}" class="note">{{ msg }}</div>
-    <div class="card">
-      <h3>Server</h3>
-      <div class="kv">
+
+    <!-- Server -->
+    <div class="card" style="margin-bottom:.8rem">
+      <h3 style="color:var(--jkr-lav);font-size:.95rem">Server</h3>
+      <div class="kv" style="margin-bottom:.5rem">
         <dt>Port</dt><dd><input v-model.number="settings.port" type="number" class="input" style="width:100px" min="1000" max="65535" /></dd>
         <dt>Bind</dt><dd>
           <select v-model="settings.bind" class="select" style="width:160px">
@@ -109,10 +124,12 @@ onMounted(load)
         </dd>
         <dt>DATA_DIR</dt><dd><input v-model="settings.dataDir" class="input" style="width:240px" /></dd>
       </div>
-      <button class="btn" style="margin-top:.8rem" @click="save" :disabled="saving">{{ saving ? 'Saving…' : 'Save' }}</button>
+      <button class="btn" @click="save" :disabled="saving">{{ saving ? 'Saving…' : 'Save' }}</button>
     </div>
-    <div class="card">
-      <h3>Backup & Restore</h3>
+
+    <!-- Backup & Restore -->
+    <div class="card" style="margin-bottom:.8rem">
+      <h3 style="color:var(--jkr-lav);font-size:.95rem">Backup & Restore</h3>
       <div class="kv">
         <dt>Export config</dt><dd><button class="btn ghost btn-sm" @click="exportConfig">Export JSON</button></dd>
         <dt>Import config</dt><dd>
@@ -122,26 +139,58 @@ onMounted(load)
           </label>
         </dd>
       </div>
-      <p class="note">Export/import portable config (providers, combos, pools, keys). Does not include usage logs.</p>
+      <p class="note" style="font-size:.75rem;margin-top:.3rem">Export/import portable config (providers, combos, pools, keys). Does not include usage logs.</p>
     </div>
-    <div class="card">
-      <h3>Resilience Defaults</h3>
+
+    <!-- Resilience Defaults -->
+    <div class="card" style="margin-bottom:.8rem">
+      <h3 style="color:var(--jkr-lav);font-size:.95rem">Resilience Defaults</h3>
       <div class="kv">
-        <dt>Cooldown (429)</dt><dd>60s (default when Retry-After absent)</dd>
-        <dt>WAL checkpoint</dt><dd>5m interval</dd>
-        <dt>Log channel</dt><dd>4096 buffer (drop+counter when full)</dd>
+        <dt>Cooldown (429)</dt><dd class="note" style="font-size:.8rem">60s default when Retry-After header absent</dd>
+        <dt>Circuit Breaker</dt><dd class="note" style="font-size:.8rem">Auto-disable account after 5 consecutive failures</dd>
+        <dt>WAL checkpoint</dt><dd class="note" style="font-size:.8rem">5m interval to flush SQLite WAL</dd>
+        <dt>Log channel</dt><dd class="note" style="font-size:.8rem">4096 buffer; drops oldest + increments counter when full</dd>
+        <dt>Stream guard</dt><dd class="note" style="font-size:.8rem">Atomic bool prevents concurrent writes during streaming</dd>
       </div>
     </div>
-    <div class="card">
-      <h3>Capacity Adapter</h3>
-      <p class="note" style="margin-bottom:.5rem">Fallback models when combo lacks required capability. Auto-applied per request.</p>
+
+    <!-- RTK Token Saver -->
+    <div class="card" style="margin-bottom:.8rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+        <h3 style="color:var(--jkr-lav);font-size:.95rem;margin:0">RTK Token Saver</h3>
+        <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+          <input type="checkbox" :checked="rtkStatus.enabled" @change="rtkStatus.enabled = ($event.target as HTMLInputElement).checked" />
+          <span class="note" style="font-size:.75rem">{{ rtkStatus.enabled ? 'Aktif' : 'Nonaktif' }}</span>
+        </label>
+      </div>
+      <div class="kv">
+        <dt>Status</dt><dd>
+          <span :class="rtkStatus.enabled ? 'st active' : 'st disabled'" style="font-size:.75rem">
+            {{ rtkStatus.enabled ? 'Tracking enabled' : 'Disabled' }}
+          </span>
+        </dd>
+        <dt>Sliding Window</dt><dd class="note" style="font-size:.8rem">{{ formatWindow(rtkStatus.windowSec) }} (default 24h)</dd>
+        <dt>Tokens Tracked</dt><dd class="note" style="font-size:.8rem">{{ rtkStatus.saved }} akun dengan token tersimpan</dd>
+      </div>
+      <p class="note" style="font-size:.7rem;margin-top:.3rem">
+        Setiap request sukses menyimpan token ke store. Saat quota terlewati, akun otomatis dinonaktifkan
+        sampai window berikutnya. Mencegah pemborosan cost pada akun yang sudah limit.
+      </p>
+    </div>
+
+    <!-- Capacity Adapter -->
+    <div class="card" style="margin-bottom:.8rem">
+      <h3 style="color:var(--jkr-lav);font-size:.95rem">Capacity Adapter</h3>
+      <p class="note" style="font-size:.8rem;margin-bottom:.5rem">
+        Fallback models when combo lacks required capability. Auto-applied per request.
+      </p>
       <div class="kv" style="flex-direction:column;gap:.4rem">
         <div v-for="k in capKeys" :key="k" style="display:flex;align-items:center;gap:1rem">
-          <dt style="min-width:120px;text-transform:capitalize">{{ k.replace('_',' ') }}</dt>
+          <dt style="min-width:120px;text-transform:capitalize;font-size:.8rem">{{ k.replace('_',' ') }}</dt>
           <dd style="display:flex;align-items:center;gap:.5rem">
             <label style="display:flex;align-items:center;gap:.3rem;cursor:pointer">
-              <input type="radio" :name="k" :value="'off'" :checked="!capAdapter[k]" @change="setCap(k,'off')" />
-              <span>off</span>
+              <input type="radio" :name="k" value="off" :checked="!capAdapter[k]" @change="setCap(k,'off')" />
+              <span class="note" style="font-size:.75rem">off</span>
             </label>
             <select v-model="capAdapter[k]" class="select" style="width:220px" @change="setCap(k, $event.target.value)">
               <option value="off">off</option>
@@ -156,4 +205,5 @@ onMounted(load)
 <style scoped>
 .hidden { display: none; }
 .kv { display: flex; flex-direction: column; gap: .4rem; }
+.btn-sm { font-size:.7rem;padding:.15rem .4rem; }
 </style>

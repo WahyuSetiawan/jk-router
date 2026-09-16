@@ -18,12 +18,19 @@ import (
 
 // AccountShort is a lightweight account representation for JSON responses.
 type AccountShort struct {
-	ID        int64  `json:"id"`
-	Label     string `json:"label"`
-	AuthType  string `json:"auth_type"`
-	State     string `json:"state"`
-	Priority  int    `json:"priority"`
-	CreatedAt int64  `json:"created_at"`
+	ID            int64   `json:"id"`
+	Label         string  `json:"label"`
+	AuthType      string  `json:"auth_type"`
+	State         string  `json:"state"`
+	Priority      int     `json:"priority"`
+	CreatedAt     int64   `json:"created_at"`
+	ProxyPoolID   *int64  `json:"proxy_pool_id"`
+	ProxyPoolName string  `json:"proxy_pool_name"`
+	ExpiresAt     int64   `json:"expires_at"`
+	QuotaLimit    int64   `json:"quota_limit"`
+	QuotaWindow   int64   `json:"quota_window_seconds"`
+	QuotaResetAt  int64   `json:"quota_reset_at"`
+	QuotaUsed     int64   `json:"quota_used"`
 }
 
 // DashboardRouter mounts all /api/dashboard/* endpoints.
@@ -100,12 +107,15 @@ func ListProvidersHandler(d *db.DB) http.HandlerFunc {
 		}
 		provRows.Close()
 
-		// Fetch all accounts
+		// Fetch all accounts (with proxy pool + quota info)
 		acctRows, err := d.Query(`
 			SELECT a.id, a.provider_id, a.label, a.auth_type, a.state,
-			       a.priority, a.created_at, p.name AS provider_name
+			       a.priority, a.created_at, a.proxy_pool_id, COALESCE(pp.name, ''),
+			       COALESCE(a.expires_at,0),
+			       COALESCE(a.quota_limit,0), COALESCE(a.quota_window_seconds,86400), COALESCE(a.quota_reset_at,0)
 			FROM accounts a
 			LEFT JOIN providers p ON a.provider_id = p.id
+			LEFT JOIN proxy_pools pp ON a.proxy_pool_id = pp.id
 			ORDER BY p.name, a.label
 		`)
 		if err != nil {
@@ -116,8 +126,8 @@ func ListProvidersHandler(d *db.DB) http.HandlerFunc {
 
 		for acctRows.Next() {
 			var a AccountShort
-			var providerID, providerName string
-			if err := acctRows.Scan(&a.ID, &providerID, &a.Label, &a.AuthType, &a.State, &a.Priority, &a.CreatedAt, &providerName); err != nil {
+			var providerID string
+			if err := acctRows.Scan(&a.ID, &providerID, &a.Label, &a.AuthType, &a.State, &a.Priority, &a.CreatedAt, &a.ProxyPoolID, &a.ProxyPoolName, &a.ExpiresAt, &a.QuotaLimit, &a.QuotaWindow, &a.QuotaResetAt); err != nil {
 				http.Error(w, `{"error":"scan account"}`, 500)
 				return
 			}
@@ -981,8 +991,14 @@ func GetQuotaHandler(d *db.DB) http.HandlerFunc {
 			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 			return
 		}
+		// Calculate used tokens in current window
+		var used int64
+		windowStart := quotaResetAt - quotaWindowSec
+		if quotaResetAt > 0 && windowStart > 0 {
+			d.QueryRow(`SELECT COALESCE(SUM(tok_in + tok_out), 0) FROM usage_log WHERE account_id=? AND ts > ?`, id, time.Unix(windowStart, 0).Format("2006-01-02 15:04:05")).Scan(&used)
+		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"quota_limit":%d,"quota_window_seconds":%d,"quota_reset_at":%d,"used":0}`, quotaLimit, quotaWindowSec, quotaResetAt)
+		fmt.Fprintf(w, `{"quota_limit":%d,"quota_window_seconds":%d,"quota_reset_at":%d,"used":%d}`, quotaLimit, quotaWindowSec, quotaResetAt, used)
 	}
 }
 

@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 const pools = ref<any[]>([])
+const accounts = ref<any[]>([])
 const showing = ref(false)
 const form = ref({ name: '', proxy_url: '', ptype: 'http', no_proxy: '', strict_proxy: false, is_active: true })
 
 async function load() {
-  const r = await fetch('/api/dashboard/proxy-pools').then(x => x.json())
-  pools.value = r.proxy_pools || []
+  const [p, a] = await Promise.all([
+    fetch('/api/dashboard/proxy-pools').then(x => x.json()),
+    fetch('/api/dashboard/connections').then(x => x.json()),
+  ])
+  pools.value = p.proxy_pools || []
+  accounts.value = a.connections || []
 }
 async function create() {
   if (!form.value.name) return
@@ -22,15 +27,19 @@ async function create() {
   await load()
 }
 async function del(id: number) {
+  if (!confirm('Hapus pool ini?')) return
   await fetch(`/api/dashboard/proxy-pools/${id}`, { method: 'DELETE' })
   await load()
 }
-const stateClass = (p: any) => {
-  if (p.test_status === 'healthy' || p.test_status === 'idle') return 'st ok'
-  if (p.test_status === 'deactivated') return 'st err'
-  return 'st ok'
+function boundCount(poolId: number | null) {
+  return accounts.value.filter(a => a.proxy_pool_id === poolId).length
 }
-const stateText = (p: any) => p.test_status || 'idle'
+function testStatusClass(p: any) {
+  if (p.test_status === 'healthy') return 'st active'
+  if (p.test_status === 'deactivated') return 'st disabled'
+  return 'st cooling'
+}
+function testStatusText(p: any) { return p.test_status || 'idle' }
 onMounted(load)
 </script>
 <template>
@@ -39,7 +48,7 @@ onMounted(load)
       <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0">Proxy Pools</h2>
       <button class="btn" @click="showing=true">+ New Pool</button>
     </div>
-    <div v-if="showing" class="card">
+    <div v-if="showing" class="card" style="margin-bottom:1rem">
       <h3>New Proxy Pool</h3>
       <div class="kv" style="margin-bottom:.8rem">
         <dt>Name</dt><dd><input v-model="form.name" class="input" placeholder="e.g. fast-us-1" /></dd>
@@ -60,18 +69,24 @@ onMounted(load)
     </div>
     <div class="grid3">
       <div v-for="p in pools" :key="p.id" class="card" style="margin-bottom:0">
-        <h3>{{ p.name }} <span :class="stateClass(p)">{{ stateText(p) }}</span></h3>
+        <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:.4rem">
+          <h3 style="color:var(--jkr-lav);font-size:.95rem;margin:0">{{ p.name }}</h3>
+          <span :class="testStatusClass(p)" style="font-size:.7rem">{{ testStatusText(p) }}</span>
+        </div>
         <div class="kv">
           <dt>Type</dt><dd>{{ p.ptype }}</dd>
           <dt>URL</dt><dd class="font-mono" style="font-size:.75rem">{{ p.proxy_url || '—' }}</dd>
           <dt>noProxy</dt><dd>{{ p.no_proxy || '—' }}</dd>
           <dt>Strict</dt><dd>{{ p.strict_proxy ? '✓' : '—' }}</dd>
+          <dt>Akun Terikat</dt><dd>
+            <span class="st active" style="font-size:.7rem">{{ boundCount(p.id) }} akun</span>
+          </dd>
         </div>
         <div style="display:flex;gap:.5rem;margin-top:.5rem">
-          <button class="btn ghost btn-sm">Test</button>
-          <button class="btn-danger btn-sm" @click="del(p.id)">Delete</button>
+          <button class="btn ghost btn-sm" @click="load">Test</button>
+          <button class="btn ghost btn-sm" style="color:var(--jkr-red)" @click="del(p.id)">Delete</button>
         </div>
-        <p class="note">last test {{ p.last_tested ? new Date(p.last_tested * 1000).toLocaleString() : 'never' }}</p>
+        <p class="note" style="font-size:.7rem">last test {{ p.last_tested ? new Date(p.last_tested * 1000).toLocaleString() : 'never' }}</p>
       </div>
     </div>
     <div v-if="pools.length===0 && !showing" class="note" style="text-align:center;padding:2rem">No proxy pools configured</div>
@@ -79,6 +94,7 @@ onMounted(load)
 </template>
 <style scoped>
 .page-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; }
+.btn-sm { font-size:.7rem;padding:.15rem .4rem; }
 .btn-danger { background:var(--jkr-red); color:var(--jkr-crust); border:none; padding:.25rem .5rem; border-radius:4px; font-size:.7rem; cursor:pointer; }
 .font-mono { font-family:ui-monospace,'Cascadia Code',monospace; }
 </style>
