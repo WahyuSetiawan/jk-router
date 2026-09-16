@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -18,6 +19,15 @@ import (
 	"jkrouter/jkserver/internal/settings"
 	"jkrouter/jkserver/internal/translator"
 )
+
+// Build metadata — injected via ldflags at build time.
+var (
+	Version   = "dev"
+	GitCommit = "unknown"
+	BuildTime = "unknown"
+)
+
+const githubRepo = "juragankoding/jkrouter"
 
 func main() {
 	args := os.Args[1:]
@@ -89,6 +99,10 @@ Examples:
 			log.Fatal("usage: jkrouter import <config.json> [--data-dir /path]")
 		}
 		ImportConfig(args[1], dataDir)
+	case "version":
+		fmt.Printf("jkrouter %s\ncommit: %s\nbuilt:  %s\nGOOS:   %s / GOARCH: %s\n", Version, GitCommit, BuildTime, runtime.GOOS, runtime.GOARCH)
+	case "update":
+		Update()
 	default:
 		log.Fatalf("unknown command: %s", cmd)
 	}

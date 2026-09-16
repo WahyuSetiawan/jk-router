@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -119,7 +121,13 @@ func Router(d *db.DB, transReg *translator.Registry, ul *UsageLogger) chi.Router
 	r.Get("/api/dashboard/oauth/{provider}/start", func(w http.ResponseWriter, req *http.Request) {
 		provider := chi.URLParam(req, "provider")
 		stateID, _ := oauthStore.Create(provider, req.URL.Query().Get("redirect"))
-		redirectURL := buildOAuthAuthURL(provider, stateID, req)
+		localAddr, cleanup, err := StartOAuthLocalServer()
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"failed to start oauth callback server: %v"}`, err), http.StatusInternalServerError)
+			return
+		}
+		defer cleanup()
+		redirectURL := buildOAuthAuthURL(provider, stateID, localAddr, req)
 		http.Redirect(w, req, redirectURL, http.StatusTemporaryRedirect)
 	})
 
@@ -136,7 +144,7 @@ func Router(d *db.DB, transReg *translator.Registry, ul *UsageLogger) chi.Router
 			http.Error(w, `{"error":"invalid or expired state"}`, http.StatusBadRequest)
 			return
 		}
-		token, err := exchangeCode(provider, code, st.Redirect)
+		token, err := exchangeCode(provider, code)
 		if err != nil {
 			http.Error(w, fmt.Sprintf(`{"error":"token exchange failed: %v"}`, err), http.StatusBadGateway)
 			return
@@ -373,25 +381,84 @@ func extractBearer(req *http.Request) string {
 
 func extractBearerFromReq(s string) string { return s }
 
-func buildOAuthAuthURL(provider, stateID string, req *http.Request) string {
+func buildOAuthAuthURL(provider, stateID, localAddr string, req *http.Request) string {
+	cbURL := fmt.Sprintf("http://%s/api/dashboard/oauth/cb", localAddr)
 	switch provider {
 	case "openai":
 		return fmt.Sprintf("https://auth.openai.com/oauth/authorize?client_id=%s&response_type=code&redirect_uri=%s&state=%s&scope=offline_access",
 			req.URL.Query().Get("client_id"),
-			url.QueryEscape(req.URL.Query().Get("redirect")),
+			url.QueryEscape(cbURL),
 			stateID)
 	case "anthropic":
 		return fmt.Sprintf("https://console.anthropic.com/oauth/authorize?client_id=%s&response_type=code&redirect_uri=%s&state=%s&scope=%s",
 			req.URL.Query().Get("client_id"),
-			url.QueryEscape(req.URL.Query().Get("redirect")),
+			url.QueryEscape(cbURL),
 			stateID,
 			url.QueryEscape("none"))
 	default:
-		return fmt.Sprintf("https://%s/oauth/authorize?state=%s&redirect_uri=%s", provider, stateID, url.QueryEscape(req.URL.Query().Get("redirect")))
+		return fmt.Sprintf("https://%s/oauth/authorize?state=%s&redirect_uri=%s", provider, stateID, url.QueryEscape(cbURL))
 	}
 }
 
-func exchangeCode(provider, code, redirectURL string) (map[string]string, error) {
+var oauthSrvMu sync.Mutex
+var oauthServerAddr string // last started OAuth callback server address
+
+// StartOAuthLocalServer spins up a temporary HTTP server to receive the OAuth callback.
+// Returns the listen address and a cleanup function.
+func StartOAuthLocalServer() (string, func(), error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", nil, err
+	}
+	addr := ln.Addr().String()
+	oauthSrvMu.Lock()
+	oauthServerAddr = addr
+	oauthSrvMu.Unlock()
+	srv := &http.Server{}
+	go func() {
+		_ = srv.Serve(ln)
+	}()
+	cleanup := func() { srv.Close() }
+	return addr, cleanup, nil
+}
+
+func getOAuthCallbackURL(addr string) string {
+	return fmt.Sprintf("http://%s/api/dashboard/oauth/cb", addr)
+}
+
+func exchangeCode(provider, code string) (map[string]string, error) {
+	cbURL := getOAuthCallbackURL(oauthServerAddr)
+	if provider == "openai" {
+		resp, err := http.PostForm("https://auth.openai.com/oauth/token", url.Values{
+			"grant_type":    {"authorization_code"},
+			"code":          {code},
+			"redirect_uri":  {cbURL},
+			"client_id":     {""},
+			"client_secret": {""},
+		})
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		var result map[string]string
+		json.NewDecoder(resp.Body).Decode(&result)
+		return result, nil
+	}
+	if provider == "kiro" {
+		resp, err := http.PostForm("https://api.kiro.dev/oauth/token", url.Values{
+			"grant_type":   {"authorization_code"},
+			"code":         {code},
+			"redirect_uri": {cbURL},
+			"client_id":    {"jkrouter"},
+		})
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		var result map[string]string
+		json.NewDecoder(resp.Body).Decode(&result)
+		return result, nil
+	}
 	return map[string]string{
 		"access_token": "mock_token_" + code,
 		"token_type":   "bearer",

@@ -3,10 +3,13 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -184,7 +187,12 @@ func copyFile(src, dst string) error {
 }
 
 func copyBuffer(dst, src *os.File) (int64, error) {
-	return 0, nil // ponytail: use io.Copy in production
+	_, err := dst.Seek(0, 0)
+	if err != nil {
+		return 0, err
+	}
+	_, err = dst.ReadFrom(src)
+	return 0, err
 }
 
 func openBrowser(url string) error {
@@ -194,4 +202,56 @@ func openBrowser(url string) error {
 	default:
 		return exec.Command("xdg-open", url).Start()
 	}
+}
+
+// Update checks for a newer release on GitHub and replaces the running binary.
+func Update() {
+	self, err := os.Executable()
+	if err != nil {
+		log.Fatalf("update: cannot find self: %v", err)
+	}
+	dst := self + ".new"
+
+	// Determine download URL from runtime info.
+	osName := runtime.GOOS
+	arch := runtime.GOARCH
+	if osName == "linux" {
+		osName = "linux"
+	}
+	filename := fmt.Sprintf("jkrouter-%s-%s", osName, arch)
+	url := fmt.Sprintf("https://github.com/%s/releases/latest/download/%s", githubRepo, filename)
+	fmt.Printf("Checking %s ...\n", url)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Fatalf("update: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		log.Fatalf("update: HTTP %d — no release found for %s/%s", resp.StatusCode, osName, arch)
+	}
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		log.Fatalf("update: %v", err)
+	}
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		out.Close()
+		os.Remove(dst)
+		log.Fatalf("update: %v", err)
+	}
+	out.Close()
+
+	// Atomic swap: rename old binary to backup, then rename new in place.
+	backup := self + ".bak"
+	if err := os.Rename(self, backup); err != nil {
+		os.Remove(dst)
+		log.Fatalf("update: cannot backup current binary: %v", err)
+	}
+	if err := os.Rename(dst, self); err != nil {
+		os.Rename(backup, self) // rollback
+		log.Fatalf("update: cannot install new binary: %v", err)
+	}
+	os.Remove(backup) // clean up backup
+	fmt.Println("Updated successfully. Restart jkrouter to use the new version.")
 }

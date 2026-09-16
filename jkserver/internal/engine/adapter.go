@@ -21,7 +21,7 @@ func NewCapacityAdapter(modelMap map[Capability]string) *CapacityAdapter {
 // WrapRequest wraps an OpenAI chat request body so that any combo member
 // lacking the required capabilities is replaced by an adapter fallback model.
 // Returns the wrapped body and the adapter model used (or empty if no wrapping needed).
-func (a *CapacityAdapter) WrapRequest(body []byte, required []Capability, comboModels []string) ([]byte, string, error) {
+func (a *CapacityAdapter) WrapRequest(body []byte, required []Capability) ([]byte, string, error) {
 	var req struct {
 		Model    string          `json:"model"`
 		Messages json.RawMessage `json:"messages"`
@@ -42,6 +42,8 @@ func (a *CapacityAdapter) WrapRequest(body []byte, required []Capability, comboM
 		return body, "", nil
 	}
 
+	// Update the model field so the downstream executor uses the adapter model.
+	req.Model = adapterModel
 	modified, _ := json.Marshal(req)
 	log.Printf("[adapter] wrapped request with fallback model %s for capabilities %v", adapterModel, required)
 	return modified, adapterModel, nil

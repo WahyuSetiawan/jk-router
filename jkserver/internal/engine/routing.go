@@ -6,16 +6,34 @@
 package engine
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"time"
 
 	"jkrouter/jkserver/internal/executors"
+	"jkrouter/jkserver/internal/providers/registry"
 	"jkrouter/jkserver/internal/proxypool"
 	"jkrouter/jkserver/internal/translator"
 )
+
+// routeBufferWriter wraps a bytes.Buffer to implement http.ResponseWriter.
+type routeBufferWriter struct {
+	buf        bytes.Buffer
+	header     http.Header
+	statusCode int
+}
+
+func (b *routeBufferWriter) Header() http.Header            { return b.header }
+func (b *routeBufferWriter) Write(p []byte) (int, error)    { return b.buf.Write(p) }
+func (b *routeBufferWriter) WriteHeader(code int)           { b.statusCode = code }
+
+func newRouteBufferWriter() *routeBufferWriter {
+	return &routeBufferWriter{header: make(http.Header)}
+}
 
 // ProviderMeta holds transport-level config for one upstream provider.
 type ProviderMeta struct {
@@ -89,7 +107,7 @@ func ExecuteRouting(body []byte, bearer string, stream bool, w http.ResponseWrit
 	for i, c := range candidates {
 		reqBody := body
 		if cfg.CapacityAdapter != nil && len(reqCapList) > 0 {
-			if adapted, newModel, err := cfg.CapacityAdapter.WrapRequest(reqBody, reqCapList, c.meta.ModelIDs); err == nil && newModel != "" {
+			if adapted, newModel, err := cfg.CapacityAdapter.WrapRequest(reqBody, reqCapList); err == nil && newModel != "" {
 				reqBody = adapted
 				model = newModel
 			}
@@ -98,8 +116,13 @@ func ExecuteRouting(body []byte, bearer string, stream bool, w http.ResponseWrit
 		exe := buildExecutor(c, cfg)
 		exe.StreamGuard.Store(false)
 
-		code, err := exe.ExecuteWithResult(reqBody, bearer, stream, w)
-		if err == nil {
+		// Use a buffer writer for failed attempts so we don't leak partial responses.
+		bw := newRouteBufferWriter()
+		code, err := exe.ExecuteWithResult(reqBody, bearer, stream, bw)
+		if err == nil && code >= 200 && code < 300 {
+			// Flush successful response to the actual writer.
+			w.WriteHeader(code)
+			io.Copy(w, &bw.buf)
 			if i > 0 {
 				log.Printf("[routing] req=%s fallback ok on %s/%s#%d", reqID, c.meta.ID, model, c.accountID)
 			}
@@ -213,14 +236,41 @@ func buildCandidates(cfg *RoutingConfig, requestedModel string, requiredCaps []C
 	return allCands
 }
 
-// candidateSupportsCaps checks whether the provider's known models cover all required capabilities.
+// candidateSupportsCaps checks whether any model in the provider's registry
+// supports all required capabilities.
 func candidateSupportsCaps(meta *ProviderMeta, caps []Capability) bool {
-	_ = meta
 	if len(caps) == 0 {
 		return true
 	}
-	// ponytail: optimistic stub — full impl reads registry ModelCaps to filter by capability.
-	return true
+	r := registry.FindByID(meta.ID)
+	if r == nil {
+		// No registry info available; fall back to optimistic (allow through).
+		return true
+	}
+	required := make(map[string]bool, len(caps))
+	for _, c := range caps {
+		required[string(c)] = true
+	}
+	for _, m := range r.Models {
+		hasAll := true
+		for capStr := range required {
+			found := false
+			for _, mc := range m.Capabilities {
+				if mc == capStr {
+					found = true
+					break
+				}
+			}
+			if !found {
+				hasAll = false
+				break
+			}
+		}
+		if hasAll {
+			return true
+		}
+	}
+	return false
 }
 
 func findMeta(providers []*ProviderMeta, key string) *ProviderMeta {

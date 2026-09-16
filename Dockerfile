@@ -1,17 +1,27 @@
-# Build stage
-FROM golang:1.23-bookworm AS builder
+# Build web frontend
+FROM node:22-alpine AS web-builder
 WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN go build -o /jkrouter ./jkserver/cmd/
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
+COPY web .
+RUN pnpm build
 
-# Runtime stage
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+# Build Go binary
+FROM golang:1.26-alpine AS builder
+ARG VERSION=dev
+WORKDIR /app
+COPY jkserver/go.mod jkserver/go.sum ./jkserver/
+RUN cd jkserver && go mod download
+COPY jkserver ./jkserver
+COPY --from=web-builder /app/.output ./jkserver/web/.output
+RUN cd jkserver && go build -ldflags="-s -w -X main.Version=$VERSION" -o /jkrouter ./cmd/
+
+# Runtime
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=builder /jkrouter /usr/local/bin/jkrouter
 EXPOSE 20128
-ENV DATA_DIR=/data
+ENV DATA_DIR=/data PORT=20128
 VOLUME ["/data"]
-ENTRYPOINT ["jkrouter", "--port", "20128"]
+ENTRYPOINT ["jkrouter", "serve", "--port", "20128"]

@@ -65,7 +65,7 @@ func (e *Executor) executeWithResult(reqBody []byte, bearer string, stream bool,
 		return 0, fmt.Errorf("executor: new request: %w", err)
 	}
 	if bearer != "" {
-		outReq.Header.Set(e.AuthHeader, e.AuthPrefix+" "+bearer)
+		outReq.Header.Set(e.AuthHeader, strings.TrimSpace(e.AuthPrefix)+" "+bearer)
 	}
 	for k, v := range e.Headers {
 		outReq.Header.Set(k, v)
