@@ -159,7 +159,7 @@ func runServer(dataDir string, port int) {
 	// Auth endpoints are OUTSIDE middleware (login/logout).
 	r.Post("/api/dashboard/auth/login", api.LoginHandler(d))
 	r.Post("/api/dashboard/auth/logout", api.LogoutHandler())
-	r.Mount("/api/dashboard", api.DashboardRouter(d, refMgr.RefreshAll))
+	r.Mount("/api/dashboard", api.DashboardRouter(d, transReg, refMgr.RefreshAll))
 
 	r.Handle("/dashboard/*", http.StripPrefix("/dashboard/", http.FileServer(http.FS(webFS))))
 

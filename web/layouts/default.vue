@@ -13,6 +13,9 @@
       <div class="nav-sec">System</div>
       <NuxtLink to="/api-keys" class="nav-link" :class="{ active: route.path.startsWith('/api-keys') }">API Keys</NuxtLink>
       <NuxtLink to="/media-providers" class="nav-link" :class="{ active: route.path.startsWith('/media-providers') }">Media Providers</NuxtLink>
+      <NuxtLink to="/basic-chat" class="nav-link" :class="{ active: route.path.startsWith('/basic-chat') }">Basic Chat</NuxtLink>
+      <NuxtLink to="/translator" class="nav-link" :class="{ active: route.path.startsWith('/translator') }">Translator</NuxtLink>
+      <NuxtLink to="/cli-tools" class="nav-link" :class="{ active: route.path.startsWith('/cli-tools') }">CLI Tools</NuxtLink>
       <NuxtLink to="/settings" class="nav-link" :class="{ active: route.path.startsWith('/settings') }">Settings</NuxtLink>
       <NuxtLink to="/profile" class="nav-link" :class="{ active: route.path.startsWith('/profile') }">Profile</NuxtLink>
     </nav>

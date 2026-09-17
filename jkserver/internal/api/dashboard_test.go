@@ -37,7 +37,7 @@ func TestDashboardEndpoints(t *testing.T) {
 	}
 
 	r := chi.NewRouter()
-	r.Mount("/api/dashboard", DashboardRouter(d, nil))
+	r.Mount("/api/dashboard", DashboardRouter(d, nil, nil))
 	ts := httptest.NewServer(r)
 	defer ts.Close()
 

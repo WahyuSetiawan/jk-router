@@ -22,6 +22,7 @@ import (
 
 	"jkrouter/jkserver/internal/db"
 	"jkrouter/jkserver/internal/settings"
+	"jkrouter/jkserver/internal/translator"
 )
 
 // AccountShort is a lightweight account representation for JSON responses.
@@ -43,7 +44,7 @@ type AccountShort struct {
 
 // DashboardRouter mounts all /api/dashboard/* endpoints.
 // refreshFn is an optional callback for manual model refresh; nil skips the endpoint.
-func DashboardRouter(d *db.DB, refreshFn func()) chi.Router {
+func DashboardRouter(d *db.DB, transReg *translator.Registry, refreshFn func()) chi.Router {
 	r := chi.NewRouter()
 	r.Use(RequireAuth(d))
 	r.Get("/providers", ListProvidersHandler(d))
@@ -93,6 +94,13 @@ func DashboardRouter(d *db.DB, refreshFn func()) chi.Router {
 	r.Post("/media-connections", CreateMediaConnectionHandler(d))
 	r.Delete("/media-connections/{id}", DeleteMediaConnectionHandler(d))
 	r.Patch("/media-connections/{id}/toggle", ToggleMediaConnectionHandler(d))
+
+	// Translator debug
+	r.Get("/translator/pairs", ListTranslatorPairsHandler(transReg))
+	r.Post("/translator/preview", PreviewTranslatorHandler(transReg))
+
+	// CLI tools
+	r.Get("/cli-tools", ListCLIToolsHandler(d))
 
 	return r
 }
@@ -1295,5 +1303,137 @@ func ToggleMediaConnectionHandler(d *db.DB) http.HandlerFunc {
 		})
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"id":%s,"active":%t}`, id, active)
+	}
+}
+
+// ─────────────────── Translator debug ────────────────────────────────────────
+
+type pairInfo struct {
+	Pair       string `json:"pair"`
+	FormatFrom string `json:"format_from"`
+	FormatTo   string `json:"format_to"`
+}
+
+// ListTranslatorPairsHandler returns available translator pairs.
+func ListTranslatorPairsHandler(transReg *translator.Registry) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		if transReg == nil {
+			json.NewEncoder(w).Encode(map[string]interface{}{"pairs": []pairInfo{}})
+			return
+		}
+		// The registry doesn't expose pairs directly; we know the registered ones.
+		pairs := []pairInfo{
+			{Pair: "openai:anthropic", FormatFrom: "openai", FormatTo: "anthropic"},
+			{Pair: "anthropic:openai", FormatFrom: "anthropic", FormatTo: "openai"},
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"pairs": pairs})
+	}
+}
+
+// PreviewTranslatorHandler translates a sample payload and returns the result.
+func PreviewTranslatorHandler(transReg *translator.Registry) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if transReg == nil {
+			http.Error(w, `{"error":"translator not available"}`, 503)
+			return
+		}
+		var req struct {
+			Pair     string `json:"pair"`
+			Payload  string `json:"payload"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Pair == "" || req.Payload == "" {
+			http.Error(w, `{"error":"pair and payload required"}`, http.StatusBadRequest)
+			return
+		}
+		parts := strings.SplitN(req.Pair, ":", 2)
+		if len(parts) != 2 {
+			http.Error(w, `{"error":"invalid pair format, expected from:to"}`, http.StatusBadRequest)
+			return
+		}
+		from, to := translator.Format(parts[0]), translator.Format(parts[1])
+		tr := transReg.Get(translator.PairFor(from, to))
+		if tr == nil || tr.Request == nil {
+			http.Error(w, fmt.Sprintf(`{"error":"no translator for %s"}`, req.Pair), http.StatusNotFound)
+			return
+		}
+		result, err := tr.Request([]byte(req.Payload), from, to)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"translate: %v"}`, err), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"pair":    req.Pair,
+			"payload": string(result),
+		})
+	}
+}
+
+// ─────────────────── CLI tools ────────────────────────────────────────────────
+
+type cliTool struct {
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Config      map[string]string `json:"config"`
+	Docs        string         `json:"docs"`
+}
+
+// ListCLIToolsHandler returns CLI tool configuration cards.
+func ListCLIToolsHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		// Read the local API key from settings
+		var apiKey string
+		d.QueryRow("SELECT value FROM settings_kv WHERE key='bootstrap_key'").Scan(&apiKey)
+		if apiKey == "" {
+			apiKey = "jk_bootstrap_key_placeholder"
+		}
+		tools := []cliTool{
+			{
+				ID:          "claude-code",
+				Name:        "Claude Code",
+				Description: "Anthropic CLI — code agent",
+				Docs:        "https://docs.anthropic.com/en/docs/claude-code",
+				Config: map[string]string{
+					"endpoint": "http://localhost:20127",
+					"model":    "claude-3-5-sonnet-20241022",
+					"api_key":  apiKey,
+				},
+			},
+			{
+				ID:          "codex",
+				Name:        "OpenAI Codex CLI",
+				Description: "OpenAI coding agent",
+				Docs:        "https://github.com/openai/codex",
+				Config: map[string]string{
+					"endpoint": "http://localhost:20127/v1",
+					"model":    "claude-3-5-sonnet-20241022",
+					"api_key":  apiKey,
+				},
+			},
+			{
+				ID:          "cursor",
+				Name:        "Cursor",
+				Description: "AI code editor",
+				Docs:        "https://cursor.sh",
+				Config: map[string]string{
+					"endpoint": "http://localhost:20127/v1",
+					"model":    "claude-3-5-sonnet-20241022",
+					"api_key":  apiKey,
+				},
+			},
+			{
+				ID:          "cline",
+				Name:        "Cline (VS Code)",
+				Description: "Autonomous coding agent for VS Code",
+				Docs:        "https://github.com/cline/cline",
+				Config: map[string]string{
+					"endpoint": "http://localhost:20127/v1",
+					"model":    "claude-3-5-sonnet-20241022",
+					"api_key":  apiKey,
+				},
+			},
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"tools": tools})
 	}
 }
