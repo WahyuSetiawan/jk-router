@@ -5,7 +5,7 @@ BIN    := /tmp/jkrouter
 CMD    := ./jkserver/cmd
 DATA   := $(HOME)/.jkrouter
 PORT   ?= 20128
-PNPM   := pnpm
+BUN    := /nix/store/fs2axbvhmim3y1dwzpf5mh56569h15df-bun-1.3.13/bin/bun
 
 # modernc.org/sqlite is pure-Go, no CGO needed
 GOENV = CGO_ENABLED=0 GOROOT=$(GOROOT)
@@ -27,7 +27,7 @@ build:
 
 build-ui:
 	@echo "🛠  Building Nuxt UI..."
-	cd web && $(PNPM) build
+	cd web && $(BUN) build
 	@echo "✓ web/.output/ ready"
 
 embed-ui:
@@ -44,7 +44,7 @@ deploy: build-ui embed-ui build
 
 watch-ui:
 	@echo "👀 Watching Nuxt changes..."
-	cd web && $(PNPM) dev
+	cd web && $(BUN) dev
 
 test:
 	env $(GOENV) $(GO) test ./... -count=1
