@@ -33,6 +33,26 @@ const providerOptions = computed(() => [...new Set(logs.value.map(l => l.provide
 const modelOptions = computed(() => [...new Set(logs.value.map(l => l.model).filter(Boolean))] as string[])
 const statusOptions = ['success', 'error', 'fallback', 'timeout']
 
+// Provider summary for table: aggregated by provider
+const providerSummary = computed(() => {
+  const m = new Map<string, { count: number; latSum: number; costSum: number }>()
+  filteredLogs.value.forEach((l: any) => {
+    const k = l.provider || 'unknown'
+    const e = m.get(k) || { count: 0, latSum: 0, costSum: 0 }
+    e.count++
+    e.latSum += (l.latency_ms || 0)
+    e.costSum += (l.cost || 0)
+    m.set(k, e)
+  })
+  return [...m.entries()].map(([k, v]) => ({
+    provider: k,
+    count: v.count,
+    pct: filteredLogs.value.length ? (v.count / filteredLogs.value.length * 100).toFixed(1) : '0',
+    avgLat: v.count ? Math.round(v.latSum / v.count) : 0,
+    cost: v.costSum
+  })).sort((a, b) => b.count - a.count)
+})
+
 // Chart data: aggregated by provider (stacked: success vs error)
 const chartData = computed(() => {
   const byProvider = new Map<string, { ok: number; err: number }>()
@@ -206,24 +226,7 @@ onMounted(() => load())
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(g,i) in (() => {
-                const m = new Map<string,{count:number;latSum:number;costSum:number}>()
-                filteredLogs.value.forEach(l => {
-                  const k = l.provider || 'unknown'
-                  const e = m.get(k) || { count:0, latSum:0, costSum:0 }
-                  e.count++
-                  e.latSum += (l.latency_ms || 0)
-                  e.costSum += (l.cost || 0)
-                  m.set(k, e)
-                })
-                return [...m.entries()].map(([k,v]) => ({
-                  provider: k,
-                  count: v.count,
-                  pct: filteredLogs.value.length ? (v.count/filteredLogs.value.length*100).toFixed(1) : '0',
-                  avgLat: v.count ? Math.round(v.latSum/v.count) : 0,
-                  cost: v.costSum
-                })).sort((a,b) => b.count - a.count)
-              })()" :key="i">
+              <tr v-for="(g,i) in providerSummary" :key="i">
                 <td><span class="chip" style="font-size:.7rem">{{ g.provider }}</span></td>
                 <td class="note">{{ g.count }}</td>
                 <td class="note">{{ g.pct }}%</td>
