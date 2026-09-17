@@ -34,7 +34,8 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 <template>
   <div>
     <div class="page-head">
-      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0">Logs</h2>
+      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0"><span class="tag p1">P1</span> /dashboard/logs</h2>
+      <small style="color:var(--jkr-mut);font-size:.75rem">Live tail request log — mirror halaman Usage & Logs 9Router</small>
       <div style="display:flex;gap:.5rem;align-items:center">
         <span :class="['st', live ? 'active' : 'disabled']" style="font-size:.7rem">{{ live ? '● LIVE' : '○ OFFLINE' }}</span>
         <button class="btn ghost" :disabled="loading" @click="load()">↻ Refresh</button>

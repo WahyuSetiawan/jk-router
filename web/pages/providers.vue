@@ -148,7 +148,8 @@ onMounted(load)
   <div>
     <!-- Header -->
     <div class="page-head">
-      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0">Providers</h2>
+      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0"><span class="tag p1">P1</span> /dashboard/providers</h2>
+      <small style="color:var(--jkr-mut);font-size:.75rem">CRUD provider + connections (akun) + bind proxy pool</small>
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
         <input v-model="search" class="search" style="flex:1;max-width:200px" placeholder="Cari provider…" />
         <button class="btn" @click="showAddProvider=true">+ Provider</button>
@@ -227,14 +228,13 @@ onMounted(load)
         <table class="table">
           <thead>
             <tr>
-              <th style="width:30px"></th>
-              <th>Nama</th>
+              <th></th>
+              <th>Name</th>
               <th>Type</th>
               <th>Proxy Pool</th>
-              <th>Prioritas</th>
-              <th>Quota</th>
+              <th>Priority</th>
               <th>State</th>
-              <th style="width:80px">Aksi</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -284,20 +284,6 @@ onMounted(load)
               <!-- Priority -->
               <td>{{ a.priority ?? '—' }}</td>
 
-              <!-- Quota bar -->
-              <td>
-                <template v-if="getQuotaStatus(a)">
-                  <div class="quota-bar" style="display:flex;align-items:center;gap:.3rem">
-                    <div class="quota-track" style="width:60px;height:4px;background:var(--jkr-surface2);border-radius:2px;overflow:hidden">
-                      <div class="quota-fill" :style="{width:getQuotaStatus(a)!.pct+'%',background:getQuotaStatus(a)!.pct>80?'#b45151':'var(--jkr-emerald)'}" style="height:100%;border-radius:2px"></div>
-                    </div>
-                    <span class="note" style="font-size:.65rem">{{ getQuotaStatus(a)!.used }}/{{ getQuotaStatus(a)!.limit }}</span>
-                  </div>
-                  <div class="note" style="font-size:.6rem">reset: {{ getQuotaStatus(a)!.resetIn }}</div>
-                </template>
-                <span v-else class="note">—</span>
-              </td>
-
               <!-- State -->
               <td>
                 <span v-if="editingAccount !== a.id" :class="stateClass(a.state)" style="cursor:pointer" @click="toggleState(a)">
@@ -318,7 +304,7 @@ onMounted(load)
               </td>
             </tr>
             <tr v-if="!p.accounts?.length">
-              <td colspan="8" class="note" style="text-align:center;padding:.5rem">
+              <td colspan="7" class="note" style="text-align:center;padding:.5rem">
                 Belum ada akun — klik "+ Akun"
               </td>
             </tr>

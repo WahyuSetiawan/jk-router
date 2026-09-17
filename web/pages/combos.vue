@@ -108,7 +108,8 @@ onMounted(load)
 <template>
   <div>
     <div class="page-head">
-      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0">Combos</h2>
+      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0"><span class="tag p1">P1</span> /dashboard/combos</h2>
+      <small style="color:var(--jkr-mut);font-size:.75rem">Model-combo fallback chain: urut provider/model yang dicoba saat gagal</small>
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
         <input v-model="search" class="search" style="flex:1;max-width:200px" placeholder="Cari combo…" />
         <button class="btn ghost" :disabled="!!refreshStatus" @click="refreshModels">

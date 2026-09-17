@@ -150,8 +150,11 @@ onMounted(load)
 </script>
 <template>
   <div>
-    <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin-bottom:1rem">Settings</h2>
-      <div v-if="msg" :style="{color: msgType==='ok' ? 'var(--jkr-grn)' : 'var(--jkr-red)', marginBottom: '1rem'}" class="note">{{ msg }}</div>
+    <div class="page-head">
+      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0"><span class="tag p1">P1</span> /dashboard/settings</h2>
+      <small style="color:var(--jkr-mut);font-size:.75rem">System config</small>
+    </div>
+    <div v-if="msg" :style="{color: msgType==='ok' ? 'var(--jkr-grn)' : 'var(--jkr-red)', marginBottom: '1rem'}" class="note">{{ msg }}</div>
 
     <!-- Server -->
     <div class="card" style="margin-bottom:.8rem">
@@ -171,102 +174,125 @@ onMounted(load)
 
     <!-- Backup & Restore -->
     <div class="card" style="margin-bottom:.8rem">
-      <h3 style="color:var(--jkr-lav);font-size:.95rem">Backup & Restore</h3>
+      <h3 style="color:var(--jkr-lav);font-size:.95rem">Backup & Restore (§4.3)</h3>
       <div class="kv">
-        <dt>Export config</dt><dd><button class="btn ghost btn-sm" @click="exportConfig">Export JSON</button></dd>
-        <dt>Import config</dt><dd>
-          <label class="btn ghost btn-sm" style="cursor:pointer;display:inline-block">
-            Import JSON
+        <dt>Auto snapshot</dt><dd>sebelum migrasi DB · retensi 10 · <span style="color:var(--jkr-grn)">{{ backups.length ? 'latest: ' + new Date(backups[0].mod_time).toLocaleString() : 'belum ada' }}</span></dd>
+        <dt>Restore</dt><dd>
+          <select v-if="backups.length" class="select" style="width:200px;display:inline-block">
+            <option value="">Pilih snapshot…</option>
+            <option v-for="b in backups" :key="b.filename" :value="b.filename">{{ b.filename }}</option>
+          </select>
+          <span v-else class="note">tidak ada snapshot</span>
+          <button class="btn ghost btn-sm" style="margin-left:.3rem" :disabled="!backups.length || restoring" @click="doRestore(backups[0])">restore</button>
+          <span class="note" style="font-size:.7rem;margin-left:.3rem">(verifikasi SHA-256)</span>
+        </dd>
+        <dt>Export config</dt><dd>
+          <button class="btn ghost btn-sm" @click="exportConfig">export</button>
+          <label class="btn ghost btn-sm" style="cursor:pointer;display:inline-block;margin-left:.3rem">
+            import
             <input ref="importInput" type="file" accept=".json" class="hidden" @change="importConfig" style="display:none" />
           </label>
         </dd>
       </div>
-      <p class="note" style="font-size:.75rem;margin-top:.3rem">Export/import portable config (providers, combos, pools, keys). Does not include usage logs.</p>
+      <p class="note">Upgrade di atas 9Router (yang hanya punya safety backup pre-migration tanpa jalur restore).</p>
       <div v-if="backups.length" style="margin-top:.6rem;border-top:1px solid var(--jkr-brd);padding-top:.5rem">
         <p class="note" style="font-size:.8rem;margin-bottom:.3rem">DB snapshots (auto before each migration, max 10)</p>
         <table style="width:100%;font-size:.8rem;border-collapse:collapse">
-          <tr style="color:var(--jkr-fg-muted)"><th style="text-align:left;padding:.2rem 0">File</th><th>Size</th><th>Time</th><th></th></tr>
+          <thead>
+            <tr style="color:var(--jkr-fg-muted)"><th style="text-align:left;padding:.2rem 0">File</th><th>Size</th><th>Time</th><th></th></tr>
+          </thead>
+          <tbody>
           <tr v-for="b in backups" :key="b.filename" style="border-top:1px solid var(--jkr-brd)">
             <td style="padding:.25rem 0"><code style="font-size:.75rem">{{ b.filename }}</code></td>
             <td class="note">{{ (b.size/1024).toFixed(0) }} KB</td>
             <td class="note">{{ new Date(b.mod_time).toLocaleString() }}</td>
             <td><button class="btn ghost btn-sm" :disabled="restoring" @click="doRestore(b)" style="font-size:.7rem">restore</button></td>
           </tr>
+          </tbody>
         </table>
         <p v-if="restoring" class="note" style="font-size:.75rem;margin-top:.3rem;color:var(--jkr-yellow)">Restoring {{ restoringFile }}… do not restart server.</p>
       </div>
-      <p v-else class="note" style="font-size:.75rem;margin-top:.3rem">No snapshots yet — first backup created before next migration.</p>
     </div>
 
     <!-- Resilience Defaults -->
     <div class="card" style="margin-bottom:.8rem">
-      <h3 style="color:var(--jkr-lav);font-size:.95rem">Resilience Defaults</h3>
+      <h3 style="color:var(--jkr-lav);font-size:.95rem">Resilience defaults (§4.1)</h3>
       <div class="kv">
-        <dt>Cooldown (429)</dt><dd>
+        <dt>cooldown fallback 429</dt><dd>
           <input type="number" class="input" style="width:80px" :value="cooldown429" @change="cooldown429 = parseInt(($event.target as HTMLInputElement).value) || 60" />
-          <span class="note" style="font-size:.75rem;margin-left:.3rem">detik (saat Retry-After tidak ada)</span>
+          <span class="note" style="font-size:.7rem;margin-left:.3rem">saat header Retry-After absen</span>
+        </dd>
+        <dt>WAL checkpoint interval</dt><dd>
+          <input type="number" class="input" style="width:80px" :value="walInterval" @change="walInterval = parseInt(($event.target as HTMLInputElement).value) || 300" />
+          <span class="note" style="font-size:.7rem;margin-left:.3rem">detik</span>
+        </dd>
+        <dt>log channel size</dt><dd>
+          <input type="number" class="input" style="width:80px" :value="logBuffer" @change="logBuffer = parseInt(($event.target as HTMLInputElement).value) || 4096" />
+          <span class="note" style="font-size:.7rem;margin-left:.3rem">(drop+counter saat full)</span>
         </dd>
         <dt>Circuit Breaker</dt><dd>
           <input type="number" class="input" style="width:80px" :value="circuitBreaker" @change="circuitBreaker = parseInt(($event.target as HTMLInputElement).value) || 5" />
-          <span class="note" style="font-size:.75rem;margin-left:.3rem">kegagalan berturut-tut untuk disable akun</span>
+          <span class="note" style="font-size:.7rem;margin-left:.3rem">konsekutif gagal → disable akun</span>
         </dd>
-        <dt>WAL checkpoint</dt><dd>
-          <input type="number" class="input" style="width:80px" :value="walInterval" @change="walInterval = parseInt(($event.target as HTMLInputElement).value) || 300" />
-          <span class="note" style="font-size:.75rem;margin-left:.3rem">detik</span>
-        </dd>
-        <dt>Log buffer</dt><dd>
-          <input type="number" class="input" style="width:80px" :value="logBuffer" @change="logBuffer = parseInt(($event.target as HTMLInputElement).value) || 4096" />
-          <span class="note" style="font-size:.75rem;margin-left:.3rem">entri</span>
-        </dd>
-        <dt>Stream guard</dt><dd class="note" style="font-size:.8rem">Atomic bool prevents concurrent writes during streaming</dd>
       </div>
     </div>
 
     <!-- RTK Token Saver -->
     <div class="card" style="margin-bottom:.8rem">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
-        <h3 style="color:var(--jkr-lav);font-size:.95rem;margin:0">RTK Token Saver</h3>
-        <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
-          <input type="checkbox" :checked="rtkStatus.enabled" @change="rtkStatus.enabled = ($event.target as HTMLInputElement).checked" />
-          <span class="note" style="font-size:.75rem">{{ rtkStatus.enabled ? 'Aktif' : 'Nonaktif' }}</span>
-        </label>
-      </div>
+      <h3 style="color:var(--jkr-lav);font-size:.95rem">RTK token saver <span class="tag p2">P2</span></h3>
       <div class="kv">
-        <dt>Status</dt><dd>
-          <span :class="rtkStatus.enabled ? 'st active' : 'st disabled'" style="font-size:.75rem">
-            {{ rtkStatus.enabled ? 'Tracking enabled' : 'Disabled' }}
-          </span>
+        <dt>caveman</dt><dd>
+          <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+            <input type="checkbox" :checked="rtkStatus.enabled" />
+            <span class="note" style="font-size:.75rem">{{ rtkStatus.enabled ? 'on' : 'off' }}</span>
+          </label>
         </dd>
-        <dt>Sliding Window</dt><dd class="note" style="font-size:.8rem">{{ formatWindow(rtkStatus.windowSec) }} (default 24h)</dd>
-        <dt>Tokens Tracked</dt><dd class="note" style="font-size:.8rem">{{ rtkStatus.saved }} akun dengan token tersimpan</dd>
+        <dt>headroom</dt><dd>
+          <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+            <input type="checkbox" :checked="rtkStatus.enabled" disabled />
+            <span class="note" style="font-size:.75rem">off</span>
+          </label>
+        </dd>
+        <dt>system-inject</dt><dd>
+          <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+            <input type="checkbox" :checked="rtkStatus.enabled" />
+            <span class="note" style="font-size:.75rem">on</span>
+          </label>
+        </dd>
       </div>
-      <p class="note" style="font-size:.7rem;margin-top:.3rem">
-        Setiap request sukses menyimpan token ke store. Saat quota terlewati, akun otomatis dinonaktifkan
-        sampai window berikutnya. Mencegah pemborosan cost pada akun yang sudah limit.
-      </p>
     </div>
 
     <!-- Capacity Adapter -->
     <div class="card" style="margin-bottom:.8rem">
-      <h3 style="color:var(--jkr-lav);font-size:.95rem">Capacity Adapter</h3>
-      <p class="note" style="font-size:.8rem;margin-bottom:.5rem">
-        Fallback models when combo lacks required capability. Auto-applied per request.
-      </p>
-      <div class="kv" style="flex-direction:column;gap:.4rem">
-        <div v-for="k in capKeys" :key="k" style="display:flex;align-items:center;gap:1rem">
-          <dt style="min-width:120px;text-transform:capitalize;font-size:.8rem">{{ k.replace('_',' ') }}</dt>
-          <dd style="display:flex;align-items:center;gap:.5rem">
-            <label style="display:flex;align-items:center;gap:.3rem;cursor:pointer">
-              <input type="radio" :name="k" value="off" :checked="!capAdapter[k]" @change="setCap(k,'off')" />
-              <span class="note" style="font-size:.75rem">off</span>
-            </label>
-            <select v-model="capAdapter[k]" class="select" style="width:220px" @change="setCap(k, $event.target.value)">
-              <option value="off">off</option>
-              <option v-for="m in capModels" :value="m">{{ m }}</option>
-            </select>
-          </dd>
-        </div>
+      <h3 style="color:var(--jkr-lav);font-size:.95rem">Capacity Adapter (§4.2) <span class="tag p1">P1</span></h3>
+      <div class="kv">
+        <dt>vision</dt><dd>
+          <select v-model="capAdapter['vision']" class="select" style="width:220px;display:inline-block">
+            <option value="off">off</option>
+            <option v-for="m in capModels" :value="m">{{ m }}</option>
+          </select>
+          <span class="note" style="font-size:.7rem;margin-left:.3rem">strategy: fallback · pool: default oc/mimo-v2.5-free</span>
+        </dd>
+        <dt>pdf</dt><dd>
+          <select v-model="capAdapter['pdf']" class="select" style="width:220px;display:inline-block">
+            <option value="off">off</option>
+            <option v-for="m in capModels" :value="m">{{ m }}</option>
+          </select>
+        </dd>
+        <dt>audio input</dt><dd>
+          <select v-model="capAdapter['audio_input']" class="select" style="width:220px;display:inline-block">
+            <option value="off">off</option>
+            <option v-for="m in capModels" :value="m">{{ m }}</option>
+          </select>
+        </dd>
+        <dt>video input</dt><dd>
+          <select v-model="capAdapter['video_input']" class="select" style="width:220px;display:inline-block">
+            <option value="off">off</option>
+            <option v-for="m in capModels" :value="m">{{ m }}</option>
+          </select>
+        </dd>
       </div>
+      <p class="note">On saat combo user tidak punya model yang support modality itu, pool adapter di-prepend ke urutan coba (autoSwitch).</p>
     </div>
   </div>
 </template>

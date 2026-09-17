@@ -32,14 +32,17 @@ onMounted(load)
 </script>
 <template>
   <div>
-    <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin-bottom:1rem">Dashboard</h2>
+    <div class="page-head">
+      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0"><span class="tag p1">P1</span> Dashboard</h2>
+      <small style="color:var(--jkr-mut);font-size:.75rem">Ringkasan penggunaan & request terakhir</small>
+    </div>
     <div v-if="loading" class="note" style="padding:2rem;text-align:center">Loading…</div>
     <template v-else>
       <div class="grid4" style="margin-bottom:1rem">
-        <div class="card stat-card"><div class="n">{{ stats.requests }}</div><div class="l">requests</div></div>
-        <div class="card stat-card"><div class="n">{{ stats.tokensIn.toLocaleString() }}</div><div class="l">tokens in</div></div>
-        <div class="card stat-card"><div class="n">${{ typeof stats.cost === 'number' ? stats.cost.toFixed(4) : stats.cost }}</div><div class="l">est. cost</div></div>
-        <div class="card stat-card"><div class="n">{{ stats.p95Latency }}ms</div><div class="l">avg latency</div></div>
+        <div class="card stat"><div class="n">{{ stats.requests }}</div><div class="l">requests / 7d</div></div>
+        <div class="card stat"><div class="n">{{ stats.tokensIn.toLocaleString() }}</div><div class="l">tokens in</div></div>
+        <div class="card stat"><div class="n">${{ typeof stats.cost === 'number' ? stats.cost.toFixed(4) : stats.cost }}</div><div class="l">cost / 7d</div></div>
+        <div class="card stat"><div class="n">{{ stats.p95Latency }}ms</div><div class="l">avg latency</div></div>
       </div>
       <div class="card" style="margin-top:.5rem">
         <h3>Recent Requests</h3>

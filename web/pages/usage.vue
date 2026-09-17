@@ -134,54 +134,31 @@ onMounted(() => load())
 <template>
   <div>
     <div class="page-head">
-      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0">Usage</h2>
-      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-        <button class="btn ghost" @click="load()">↻ Load</button>
-        <button class="btn ghost" @click="tail()">⚡ Tail</button>
-      </div>
+      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0"><span class="tag p1">P1</span> /dashboard/usage</h2>
+      <small style="color:var(--jkr-mut);font-size:.75rem">Per-request log (WAL + writer goroutine) + chart ringan</small>
     </div>
 
     <!-- Tabs -->
-    <div style="display:flex;gap:0;margin-bottom:1rem;border-bottom:1px solid var(--jkr-brd)">
-      <button
-        class="tab-btn" :class="{ active: activeTab === 'usage' }"
-        @click="activeTab = 'usage'"
-      >Usage</button>
-      <button
-        class="tab-btn" :class="{ active: activeTab === 'logs' }"
-        @click="activeTab = 'logs'"
-      >Logs (detail)</button>
+    <div style="display:flex;gap:0;margin-bottom:1rem;border-bottom:1px solid var(--jkr-brd);font-size:.8rem">
+      <span :class="{active: activeTab==='usage'}" class="tab-item" @click="activeTab='usage'">Usage</span>
+      <span :class="{active: activeTab==='logs'}" class="tab-item" @click="activeTab='logs'">Logs (live stream)</span>
+      <span :class="{active: activeTab==='quota'}" class="tab-item" @click="activeTab='quota'">Quota <span class="tag p2" style="margin-left:.3rem">P2</span></span>
     </div>
 
     <!-- ===== USAGE TAB ===== -->
     <template v-if="activeTab === 'usage'">
       <!-- Stats Grid -->
-      <div class="stats-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.6rem;margin-bottom:1rem">
-        <div class="stat-card">
-          <div class="note" style="font-size:.7rem">Requests (7d)</div>
-          <div class="stat-val">{{ stats.requests || '—' }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="note" style="font-size:.7rem">Tokens In</div>
-          <div class="stat-val">{{ (stats.tokens_in || 0).toLocaleString() }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="note" style="font-size:.7rem">Tokens Out</div>
-          <div class="stat-val">{{ (stats.tokens_out || 0).toLocaleString() }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="note" style="font-size:.7rem">Total Cost ($)</div>
-          <div class="stat-val" :style="{color: costColor(stats.total_cost || 0)}">
-            ${{ (stats.cost || 0).toFixed(4) }}
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="note" style="font-size:.7rem">Avg Latency</div>
-          <div class="stat-val">{{ stats.avg_ms ? stats.avg_ms + 'ms' : '—' }}</div>
-        </div>
+      <div class="grid4" style="margin-bottom:1rem">
+        <div class="card stat"><div class="n">{{ stats.requests || '—' }}</div><div class="l">requests / 7d</div></div>
+        <div class="card stat"><div class="n">{{ (stats.tokens_in || 0).toLocaleString() }}</div><div class="l">tokens in</div></div>
+        <div class="card stat"><div class="n">${{ (stats.cost || 0).toFixed(4) }}</div><div class="l">cost / 7d</div></div>
+        <div class="card stat"><div class="n">{{ stats.avg_ms ? stats.avg_ms + 'ms' : '—' }}</div><div class="l">avg latency</div></div>
       </div>
 
-      <!-- Filter Bar -->
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.8rem">
+        <button class="btn ghost" @click="load()">↻ Load</button>
+        <button class="btn ghost" @click="tail()">⚡ Tail</button>
+      </div>
       <div class="card" style="margin-bottom:1rem">
         <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
           <select v-model="filterProvider" class="select" style="width:130px">
@@ -199,10 +176,12 @@ onMounted(() => load())
         </div>
       </div>
 
-      <!-- Chart (chart.js) -->
-      <div class="card" style="margin-bottom:1rem">
-        <h3 style="color:var(--jkr-lav);font-size:.9rem;margin:0 0 .5rem">Request Distribution (by Provider)</h3>
-        <div style="height:200px;position:relative">
+      <!-- Chart -->
+      <div class="card" style="margin-top:.8rem">
+        <h3>Chart: tokens per hari, per provider</h3>
+        <div class="bar" style="height:80px"><i style="width:84%"></i></div>
+        <p class="note">chart.js bar/line. Filter: provider / model / hari / status.</p>
+        <div style="height:200px;position:relative;margin-top:.5rem">
           <canvas id="usageChart"></canvas>
         </div>
         <div v-if="filteredLogs.length===0" class="note" style="text-align:center;padding:.5rem;font-size:.8rem">Belum ada data</div>
@@ -259,47 +238,47 @@ onMounted(() => load())
     </template>
 
     <!-- ===== LOGS TAB ===== -->
-    <template v-else>
+    <template v-else-if="activeTab === 'logs'">
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
-          <h3 style="color:var(--jkr-lav);font-size:.9rem;margin:0">Detail Request Log</h3>
+          <h3 style="color:var(--jkr-lav);font-size:.9rem;margin:0">Request detail (expand row)</h3>
           <span class="note" style="font-size:.75rem">{{ loading ? 'Memuat…' : filteredLogs.length + ' entries' }}</span>
         </div>
         <div style="overflow-x:auto">
           <table class="table">
             <thead>
               <tr>
-                <th>Waktu</th>
-                <th>Combo</th>
-                <th>Model</th>
-                <th>Provider</th>
-                <th>Status</th>
-                <th>Tok In</th>
-                <th>Tok Out</th>
-                <th>Latency</th>
-                <th>Cost</th>
-                <th>Adapter</th>
+                <th>time</th>
+                <th>client→model</th>
+                <th>upstream (provider/akun)</th>
+                <th>state</th>
+                <th>tok in/out</th>
+                <th>ms</th>
+                <th>status</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="l in filteredLogs" :key="l.request_id">
                 <td class="note" style="white-space:nowrap;font-size:.75rem">{{ formatTs(l.ts) }}</td>
-                <td><span class="chip" style="font-size:.65rem">{{ l.combo || '—' }}</span></td>
-                <td class="font-medium" style="font-size:.8rem">{{ l.model || '—' }}</td>
-                <td><span class="chip" style="font-size:.65rem">{{ l.provider || '—' }}</span></td>
-                <td><span :class="statusClass(l.status)" style="font-size:.7rem">{{ l.status }}</span></td>
-                <td class="note" style="font-size:.75rem">{{ l.tok_in ?? '—' }}</td>
-                <td class="note" style="font-size:.75rem">{{ l.tok_out ?? '—' }}</td>
-                <td class="note" style="font-size:.75rem">{{ l.latency_ms ? l.latency_ms + 'ms' : '—' }}</td>
-                <td class="note" style="font-size:.75rem;color:var(--jkr-emerald)">{{ l.cost ? '$' + Number(l.cost).toFixed(4) : '—' }}</td>
-                <td><span class="chip" style="font-size:.65rem">{{ l.adapter_used || '—' }}</span></td>
+                <td class="font-mono" style="font-size:.75rem">{{ l.combo || '—' }}</td>
+                <td class="note" style="font-size:.75rem">{{ l.provider }} · {{ l.account || '—' }}</td>
+                <td><span :class="l.status==='success'?'st ok':l.status==='fallback'?'st cooling':'st err'" style="font-size:.7rem">{{ l.status }}</span></td>
+                <td class="note" style="font-size:.75rem">{{ l.tok_in ?? '—' }} / {{ l.tok_out ?? '—' }}</td>
+                <td class="note" style="font-size:.75rem">{{ l.latency_ms || '—' }}</td>
+                <td class="note" style="font-size:.75rem">{{ l.http_status || '—' }}</td>
               </tr>
               <tr v-if="filteredLogs.length===0 && !loading">
-                <td colspan="10" class="note" style="text-align:center;padding:1rem">Tidak ada data penggunaan</td>
+                <td colspan="7" class="note" style="text-align:center;padding:1rem">Tidak ada data penggunaan</td>
               </tr>
             </tbody>
           </table>
         </div>
+        <p class="note">Failover tercatat sebagai baris terpisah — log.txt mirror di ~/.jkrouter.</p>
+      </div>
+    </template>
+    <template v-else-if="activeTab === 'quota'">
+      <div class="note" style="padding:2rem;text-align:center">
+        <span class="tag p2">P2</span> Quota per-akun — hal. /quota
       </div>
     </template>
   </div>
@@ -307,14 +286,7 @@ onMounted(() => load())
 
 <style scoped>
 .page-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:.5rem; }
-.stats-grid { grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.6rem;margin-bottom:1rem; }
-.stat-card { background:var(--jkr-surface2);padding:.6rem .8rem;border-radius:var(--jkr-radius); }
-.stat-val { color:var(--jkr-floo);font-size:1.4rem;font-weight:600;margin-top:.2rem; }
-.tab-btn {
-  padding: .4rem 1rem; font-size: .85rem; cursor: pointer;
-  background: transparent; border: none; border-bottom: 2px solid transparent;
-  color: var(--jkr-text-muted); transition: all .2s;
-}
-.tab-btn.active { color: var(--jkr-lav); border-bottom-color: var(--jkr-lav); }
-.tab-btn:hover:not(.active) { color: var(--jkr-text); }
+.tab-item { color: var(--jkr-mut); padding: .3rem 0; cursor: pointer; border-bottom: 2px solid transparent; font-size: .85rem; }
+.tab-item.active { color: var(--jkr-blue); border-bottom-color: var(--jkr-blue); }
+.tab-item:hover:not(.active) { color: var(--jkr-txt); }
 </style>

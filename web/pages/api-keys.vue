@@ -38,9 +38,10 @@ onMounted(load)
 <template>
   <div>
     <div class="page-head">
-      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0">API Keys</h2>
+      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0"><span class="tag p1">P1</span> /dashboard/keys</h2>
+      <small style="color:var(--jkr-mut);font-size:.75rem">API key lokal untuk client (bukan key provider upstream)</small>
     </div>
-    <p class="note" style="margin-bottom:1rem">Client pakai key ini ke /v1 — bukan key provider upstream.</p>
+    <p class="note" style="margin-bottom:.8rem">Client pakai key ini ke /v1 — bukan key provider upstream.</p>
 
     <div v-if="showingNew && newFullKey" class="card" style="background:#f9e2af22;border-color:var(--jkr-yel);margin-bottom:1rem">
       <p style="color:var(--jkr-yel);font-size:.8rem;margin-bottom:.5rem">Save this key — it won't be shown again:</p>
@@ -66,21 +67,8 @@ onMounted(load)
             <td class="font-mono" style="font-size:.75rem;color:var(--jkr-yel)">{{ maskKey(k.key_display || '') }}</td>
             <td style="color:var(--jkr-mut);font-size:.75rem">{{ k.created_at ? new Date(k.created_at * 1000).toLocaleDateString('id-ID') : '—' }}</td>
             <td style="text-align:right">
-              <button
-                class="btn ghost btn-sm"
-                style="margin-right:.3rem"
-                :disabled="!!k.revoked"
-                @click="copyKey(k.id, k.key_hash || '')"
-              >
-                {{ copied === k.id ? 'Copied!' : 'Copy Hash' }}
-              </button>
-              <button
-                class="btn-danger btn-sm"
-                @click="revoke(k.id)"
-                :disabled="k.revoked"
-              >
-                {{ k.revoked ? 'Revoked' : 'Revoke' }}
-              </button>
+              <span class="chip" style="cursor:pointer;font-size:.7rem" @click="copyKey(k.id, k.key_hash || '')">{{ copied === k.id ? '✓ copied' : 'copy' }}</span>
+              <span class="chip" style="cursor:pointer;font-size:.7rem;margin-left:.3rem;color:var(--jkr-red)" @click="revoke(k.id)">{{ k.revoked ? 'revoked' : 'revoke' }}</span>
             </td>
           </tr>
           <tr v-if="keys.length===0"><td colspan="4" class="note" style="text-align:center;padding:1rem">No API keys</td></tr>

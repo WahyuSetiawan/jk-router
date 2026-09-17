@@ -40,7 +40,10 @@ onMounted(load)
 </script>
 <template>
   <div>
-    <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin-bottom:1rem">Profile</h2>
+    <div class="page-head">
+      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0"><span class="tag p1">P1</span> /login → /dashboard/profile</h2>
+      <small style="color:var(--jkr-mut);font-size:.75rem">Dashboard auth lokal (mirror src/app/login 9Router, bcrypt)</small>
+    </div>
     <div class="card" style="max-width:380px">
       <h3>{{ firstRun ? 'Set Dashboard Password' : 'Change Password' }}</h3>
       <div v-if="msg" :style="{color: msgType==='ok' ? 'var(--jkr-grn)' : 'var(--jkr-red)', marginBottom: '.8rem'}" class="note">{{ msg }}</div>

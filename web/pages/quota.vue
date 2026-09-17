@@ -90,7 +90,8 @@ onMounted(load)
 <template>
   <div>
     <div class="page-head">
-      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0">Quota Manager</h2>
+      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0"><span class="tag p2">P2</span> /dashboard/quota</h2>
+      <small style="color:var(--jkr-mut);font-size:.75rem">Per akun: bar kuota window reset, status aktif/cooling/disabled</small>
       <button class="btn ghost" :disabled="loading" @click="load()">↻ Refresh</button>
     </div>
 

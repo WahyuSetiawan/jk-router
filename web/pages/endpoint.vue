@@ -39,7 +39,10 @@ onMounted(async () => {
 </script>
 <template>
   <div>
-    <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin-bottom:1rem">Endpoint</h2>
+    <div class="page-head">
+      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0"><span class="tag p1">P1</span> /dashboard/endpoint</h2>
+      <small style="color:var(--jkr-mut);font-size:.75rem">Info copy-paste untuk AI CLI tools — mirror halaman endpoint 9Router</small>
+    </div>
     <p class="note" style="margin-bottom:1rem">Info copy-paste untuk AI CLI tools.</p>
 
     <!-- First-time warning -->

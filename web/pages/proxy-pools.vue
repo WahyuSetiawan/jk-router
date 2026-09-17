@@ -49,7 +49,8 @@ onMounted(load)
 <template>
   <div>
     <div class="page-head">
-      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0">Proxy Pools</h2>
+      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0"><span class="tag p1">P1</span> /dashboard/proxy-pools</h2>
+      <small style="color:var(--jkr-mut);font-size:.75rem">CRUD pool + health-test + binding (per akun, bukan global)</small>
       <button class="btn" @click="showing=true">+ New Pool</button>
     </div>
     <div v-if="showing" class="card" style="margin-bottom:1rem">

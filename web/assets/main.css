@@ -62,6 +62,12 @@ pre { background: var(--jkr-crust); border: 1px solid var(--jkr-brd); border-rad
 .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: .8rem; }
 .stat-card .n { font-size: 1.5rem; color: var(--jkr-blue); font-weight: 700; }
 .stat-card .l { font-size: .65rem; color: var(--jkr-mut); text-transform: uppercase; letter-spacing: .08em; }
+.card.stat .n { font-size: 1.5rem; color: var(--jkr-blue); font-weight: 700; }
+.card.stat .l { font-size: .65rem; color: var(--jkr-mut); text-transform: uppercase; letter-spacing: .08em; }
+.card.stat { padding: .8rem 1rem; }
+.page-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 1rem; flex-wrap: wrap; gap: .5rem; }
+.page-head h2 { font-size: 1.1rem; color: var(--jkr-lav); margin: 0; }
+.page-head small { color: var(--jkr-mut); font-size: .75rem; }
 .stat-val { color: var(--jkr-floo); font-size: 1.4rem; font-weight: 600; margin-top: .2rem; }
 .table { width: 100%; border-collapse: collapse; font-size: .8rem; }
 .table th { text-align: left; color: var(--jkr-mut); font-weight: 400; border-bottom: 1px solid var(--jkr-brd); padding: .4rem .3rem; font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; }
