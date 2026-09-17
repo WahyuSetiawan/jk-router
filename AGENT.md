@@ -53,7 +53,7 @@ make run                 # :20128, data-dir ~/.jkrouter
 make dev                 # build + nuxt dev auto-wait
 
 # Frontend
-make build-ui            # cd web && pnpm build
+make build-ui            # cd web && bun build
 make embed-ui            # copy .output → jkserver/cmd/
 make deploy              # build-ui + embed-ui + build (full pipeline)
 
@@ -61,26 +61,28 @@ make deploy              # build-ui + embed-ui + build (full pipeline)
 make backup / export / import file=x.json
 ```
 
-## ⚠️ PAKAI PNPM, BUKAN NPM
+## Package Manager: Bun
 
-**Ini wajib.** Repo ini menggunakan pnpm, bukan npm:
+Repo ini menggunakan **Bun**, bukan pnpm atau npm:
 
 ```bash
 # ✅ Benar
-pnpm install
-pnpm dev
-pnpm build
-cd web && pnpm build
+bun install
+bun dev
+bun build
+cd web && bun build
 
 # ❌ SALAH — jangan pakai
 npm install
 npm run dev
+pnpm install
 npx ...
 ```
 
-- Root `package.json` ada `pnpm-lock.yaml`
-- `web/` juga pakai pnpm (ada `pnpm-workspace.yaml`)
-- Makefile sudah set `PNPM := pnpm`
+- Bun ada di nix store: `/nix/store/...-bun-1.3.13/bin/bun`
+- Lockfile: `bun.lock` (root) dan `web/bun.lock`
+- Makefile sudah set `BUN := /nix/store/.../bun`
+- Bun secara otomatis migrate dari lockfile pnpm lama saat install
 
 ## Go — Aturan
 
