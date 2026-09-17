@@ -64,9 +64,9 @@ func New(d *db.DB) *Server { return &Server{db: d} }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
-	case "/mcp":
+	case "/mcp", "/v1/api/mcp":
 		s.handleRPC(w, r)
-	case "/mcp/stream":
+	case "/mcp/stream", "/v1/api/mcp/stream":
 		s.handleSSE(w, r)
 	default:
 		http.NotFound(w, r)
