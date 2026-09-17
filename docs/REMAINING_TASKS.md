@@ -46,7 +46,7 @@
 | 5.3 | Provider batch berikutnya | Tunggu permintaan user |
 | 5.7 | Cloud sync + MITM | P2, terakhir setelah packaging stabil |
 | 5.1 | Tray systray | Deferrd — CGO/Wayland risk per PRD §8 |
-| P2.15 | Proxy relay deploy | Butuh worker template (vercel/cloudflare/deno) |
+| P2.15 | Proxy relay deploy | ✅ DONE (baeff0a) — Vercel/Cloudflare/Deno deploy handlers + frontend modal |
 | Dashboard Capacity Adapter UI | API sudah ada, belum ada toggle di halaman Settings |
 
 ---
