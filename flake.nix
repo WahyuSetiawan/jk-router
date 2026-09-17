@@ -18,9 +18,9 @@
           go_1_26
           gopls
 
-          # Node / Nuxt / pnpm
+          # Node / Nuxt / Bun
           nodejs_22
-          pnpm
+          bun
 
           # Utilities
           git
@@ -34,7 +34,7 @@
           echo "🚀 JKRouter devshell active"
           echo "   Go   $(go version | awk '{print $3}')"
           echo "   Node $(node --version)"
-          echo "   pnpm $(pnpm --version)"
+          echo "   Bun  $(bun --version)"
         '';
       };
     });
