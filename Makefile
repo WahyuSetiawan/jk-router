@@ -27,7 +27,7 @@ build:
 
 build-ui:
 	@echo "🛠  Building Nuxt UI..."
-	cd web && $(BUN) build
+	cd web && $(BUN) run build
 	@echo "✓ web/.output/ ready"
 
 embed-ui:
@@ -44,7 +44,7 @@ deploy: build-ui embed-ui build
 
 watch-ui:
 	@echo "👀 Watching Nuxt changes..."
-	cd web && $(BUN) dev
+	cd web && $(BUN) run dev
 
 test:
 	env $(GOENV) $(GO) test ./... -count=1
@@ -83,7 +83,7 @@ help:
 	@echo "    make deploy      Build UI + embed + rebuild binary (full release)"
 	@echo ""
 	@echo "  Frontend (Nuxt)"
-	@echo "    make build-ui    Build Nuxt to web/.output/"
+	@echo "    make build-ui    Build Nuxt to web/.output/ (via bun)"
 	@echo "    make embed-ui    Copy .output → jkserver/cmd/ (embed)"
 	@echo "    make watch-ui    Run Nuxt dev server (hot reload)"
 	@echo ""
