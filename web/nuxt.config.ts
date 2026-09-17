@@ -2,6 +2,7 @@ export default defineNuxtConfig({
   css: ['~/assets/main.css'],
   devtools: { enabled: false },
   compatibilityDate: '2025-01-01',
+  experimental: { appManifest: false },
   app: { head: { title: 'JKRouter Dashboard', meta: [{ name: 'viewport', content: 'width=device-width, initial-scale=1' }] } },
   // Development: proxy /api/* → Go backend (default :20127)
   nitro: {
