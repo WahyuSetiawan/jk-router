@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/* Match wireframe font */
+html, body {
+  font-family: ui-monospace, 'Cascadia Code', 'JetBrains Mono', monospace;
+  line-height: 1.5;
+  margin: 0;
+  padding: 0;
+}
+
 /* Catppuccin Mocha palette */
 :root {
   --jkr-base: #1e1e2e;
@@ -19,7 +27,9 @@
   --jkr-text-muted: var(--jkr-mut);
   --jkr-fg-muted: var(--jkr-mut);
   --jkr-brd: #45475a;
+  --jkr-surface: var(--jkr-s0);
   --jkr-surface2: var(--jkr-s0);
+  --jkr-sub: var(--jkr-mut);
   --jkr-emerald: var(--jkr-grn);
   --jkr-yellow: var(--jkr-yel);
   --jkr-floo: var(--jkr-txt);
