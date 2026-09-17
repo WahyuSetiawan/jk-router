@@ -456,19 +456,19 @@ func loadComboStore(d *db.DB) *engine.ComboStore {
 func loadProxyPoolStore(d *db.DB) *proxypool.Store {
 	store := proxypool.NewStore()
 	d.EnqueueWriteSync(func(q *db.Queue) {
-		rs, err := q.DB().Query(`SELECT id, name, proxy_url, no_proxy, strict_proxy, is_active FROM proxy_pools`)
+		rs, err := q.DB().Query(`SELECT id, name, ptype, proxy_url, no_proxy, strict_proxy, is_active FROM proxy_pools`)
 		if err != nil || rs == nil {
 			return
 		}
 		defer rs.Close()
 		for rs.Next() {
 			var id int64
-			var name, proxyURL, noProxy string
+			var name, ptype, proxyURL, noProxy string
 			var strict, active bool
-			if err := rs.Scan(&id, &name, &proxyURL, &noProxy, &strict, &active); err != nil {
+			if err := rs.Scan(&id, &name, &ptype, &proxyURL, &noProxy, &strict, &active); err != nil {
 				continue
 			}
-			store.Add(name, proxyURL, noProxy, strict)
+			store.AddWithType(name, ptype, proxyURL, noProxy, strict)
 			if p := store.Get(id); p != nil {
 				p.IsActive = active
 			}

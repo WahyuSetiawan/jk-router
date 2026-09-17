@@ -365,11 +365,16 @@ func buildExecutor(c *routeCandidate, cfg *RoutingConfig) *executors.Executor {
 	if cfg.ProxyPoolStore != nil && c.poolID != nil {
 		pool := cfg.ProxyPoolStore.Get(*c.poolID)
 		if pool != nil && pool.IsActive && pool.ProxyURL != "" {
-			// Preserve the provider's timeout by wrapping the transport, not replacing the client.
-			orig := exe.Client
-			exe.Client = &http.Client{
-				Transport: pool.BuildTransport(),
-				Timeout:   orig.Timeout,
+			if pool.IsRelay() {
+				// Relay mode: forward through relay URL with x-relay-* headers.
+				exe.RelayURL = pool.ProxyURL
+			} else {
+				// Proxy mode: use proxy transport.
+				orig := exe.Client
+				exe.Client = &http.Client{
+					Transport: pool.BuildTransport(),
+					Timeout:   orig.Timeout,
+				}
 			}
 		}
 	}

@@ -15,6 +15,7 @@ import (
 type Pool struct {
 	ID           int64
 	Name         string
+	Type         string // "http", "socks5", "relay"
 	ProxyURL     string
 	NoProxy      string
 	StrictProxy  bool
@@ -22,6 +23,9 @@ type Pool struct {
 	TestStatus   string // "untested", "healthy", "unhealthy"
 	LastTestedAt time.Time
 }
+
+// IsRelay returns true if this pool is a relay-type pool.
+func (p *Pool) IsRelay() bool { return p.Type == "relay" }
 
 // Store manages proxy pools in memory.
 type Store struct {
@@ -43,6 +47,26 @@ func (s *Store) Add(name, proxyURL, noProxy string, strict bool) int64 {
 	p := &Pool{
 		ID:          s.nextID,
 		Name:        name,
+		ProxyURL:    proxyURL,
+		NoProxy:     noProxy,
+		StrictProxy: strict,
+		Type:        "http",
+		IsActive:    true,
+		TestStatus:  "untested",
+	}
+	s.pools[p.ID] = p
+	return p.ID
+}
+
+// AddWithType creates a new pool with explicit type and returns its ID.
+func (s *Store) AddWithType(name, ptype, proxyURL, noProxy string, strict bool) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nextID++
+	p := &Pool{
+		ID:          s.nextID,
+		Name:        name,
+		Type:        ptype,
 		ProxyURL:    proxyURL,
 		NoProxy:     noProxy,
 		StrictProxy: strict,

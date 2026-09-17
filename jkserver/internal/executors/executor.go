@@ -21,6 +21,9 @@ type Executor struct {
 	AuthPrefix string
 	Headers    map[string]string
 	MaxRetries int
+	// RelayURL, if non-empty, means requests are forwarded through a relay service.
+	// The relay receives x-relay-target and x-relay-path headers.
+	RelayURL  string
 	// StreamGuard tracks whether the first SSE data: chunk has been sent.
 	// After that point, mid-stream failover is forbidden (PRD §4.1).
 	StreamGuard atomic.Bool
@@ -59,10 +62,27 @@ func (e *Executor) ExecuteWithResult(reqBody []byte, bearer string, stream bool,
 }
 
 func (e *Executor) executeWithResult(reqBody []byte, bearer string, stream bool, w http.ResponseWriter) (int, error) {
-	url := e.BaseURL + e.APIPath
-	outReq, err := http.NewRequestWithContext(context.Background(), "POST", url, bytes.NewReader(reqBody))
-	if err != nil {
-		return 0, fmt.Errorf("executor: new request: %w", err)
+	var url string
+	var outReq *http.Request
+	var err error
+
+	if e.RelayURL != "" {
+		// Relay mode: forward to relay with target headers.
+		url = e.RelayURL
+		outReq, err = http.NewRequestWithContext(context.Background(), "POST", url, bytes.NewReader(reqBody))
+		if err != nil {
+			return 0, fmt.Errorf("executor: new request: %w", err)
+		}
+		// Preserve method for relay — some relays expect the original method in headers,
+		// but the 9Router pattern uses POST with x-relay-* headers regardless.
+		outReq.Header.Set("x-relay-target", e.BaseURL)
+		outReq.Header.Set("x-relay-path", e.APIPath)
+	} else {
+		url = e.BaseURL + e.APIPath
+		outReq, err = http.NewRequestWithContext(context.Background(), "POST", url, bytes.NewReader(reqBody))
+		if err != nil {
+			return 0, fmt.Errorf("executor: new request: %w", err)
+		}
 	}
 	if bearer != "" {
 		outReq.Header.Set(e.AuthHeader, strings.TrimSpace(e.AuthPrefix)+" "+bearer)
