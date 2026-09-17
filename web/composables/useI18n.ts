@@ -50,22 +50,6 @@ const dictionaries: Dictionaries = {
   'quota.used': 'Digunakan',
   'quota.save': 'Simpan',
   'usage.loading': 'Memuat log…',
-  'combos.delete': 'Delete Combo',
-  'combos.desc': 'Model-combo fallback chain: order of providers/models tried on failure',
-  'combos.fallback_note': 'Models without matching capability will still be used as last fallback.',
-  'proxypools.delete': 'Delete Pool',
-  'proxypools.name': 'Name',
-  'quota.limit': 'Quota Limit',
-  'quota.used': 'Used',
-  'quota.save': 'Save',
-  'combos.delete': 'Hapus Combo',
-  'combos.desc': 'Model-combo fallback chain: urut provider/model yang dicoba saat gagal',
-  'combos.fallback_note': 'Model tanpa capability yang cocok akan tetap digunakan sebagai fallback terakhir.',
-  'proxypools.delete': 'Hapus Pool',
-  'proxypools.name': 'Nama',
-  'quota.limit': 'Quota Limit',
-  'quota.used': 'Digunakan',
-  'quota.save': 'Simpan',
     // Dashboard home
     'dashboard.title': 'Dashboard',
     'dashboard.subtitle': 'Ringkasan penggunaan & request terakhir',
@@ -91,6 +75,7 @@ const dictionaries: Dictionaries = {
     'providers.api_key': 'API Key',
     'providers.priority': 'Priority',
     'providers.proxy_pool': 'Proxy Pool',
+    'providers.tags': 'Tags',
     'providers.none': 'Tidak ada',
     'providers.state_active': 'aktif',
     'providers.state_disabled': 'nonaktif',
@@ -106,20 +91,15 @@ const dictionaries: Dictionaries = {
     'combos.strategy': 'Strategi',
     'combos.fallback': 'fallback',
     'combos.roundrobin': 'round-robin',
-    'combos.none': 'Belum ada combo.',
     // Usage
     'usage.title': 'Usage & Logs',
     'usage.filter': 'Filter',
     'usage.model': 'Model',
     'usage.provider': 'Provider',
     'usage.date': 'Tanggal',
-    'usage.loading': 'Memuat log…',
     // Quota
     'quota.title': 'Quota per Akun',
-    'quota.limit': 'Quota Limit',
     'quota.window': 'Window (detik)',
-    'quota.used': 'Digunakan',
-    'quota.save': 'Simpan',
     // API Keys
     'apikeys.title': 'API Keys',
     'apikeys.add': '+ Buat Key',
@@ -175,9 +155,6 @@ const dictionaries: Dictionaries = {
     // Proxy Pools
     'proxypools.title': 'Proxy Pools',
     'proxypools.add': '+ Tambah Pool',
-    'proxypools.name': 'Nama',
-    'proxypools.type': 'Tipe',
-    'proxypools.url': 'Proxy URL',
     'proxypools.no_proxy': 'No Proxy',
     'proxypools.test': 'Test',
     'proxypools.active': 'Aktif',
@@ -275,18 +252,13 @@ const dictionaries: Dictionaries = {
     'combos.strategy': 'Strategy',
     'combos.fallback': 'fallback',
     'combos.roundrobin': 'round-robin',
-    'combos.none': 'No combos yet.',
     'usage.title': 'Usage & Logs',
     'usage.filter': 'Filter',
     'usage.model': 'Model',
     'usage.provider': 'Provider',
     'usage.date': 'Date',
-    'usage.loading': 'Loading logs…',
     'quota.title': 'Account Quota',
-    'quota.limit': 'Quota Limit',
     'quota.window': 'Window (sec)',
-    'quota.used': 'Used',
-    'quota.save': 'Save',
     'apikeys.title': 'API Keys',
     'apikeys.add': '+ Create Key',
     'apikeys.label': 'Label',
@@ -333,9 +305,6 @@ const dictionaries: Dictionaries = {
     'endpoint.desc': 'Description',
     'proxypools.title': 'Proxy Pools',
     'proxypools.add': '+ Add Pool',
-    'proxypools.name': 'Name',
-    'proxypools.type': 'Type',
-    'proxypools.url': 'Proxy URL',
     'proxypools.no_proxy': 'No Proxy',
     'proxypools.test': 'Test',
     'proxypools.active': 'Active',
@@ -367,8 +336,8 @@ function resolveLocale(): string {
     const stored = localStorage.getItem('jkr_lang')
     if (stored && stored in dictionaries) return stored
   } catch {}
-  const nav = navigator.language?.slice(0, 2) || 'id'
-  return nav in dictionaries ? nav : 'en'
+  const nav = typeof navigator !== 'undefined' ? navigator.language?.slice(0, 2) : null
+  return (nav && nav in dictionaries) ? nav : 'en'
 }
 
 const currentLocale = ref<string>(resolveLocale())
