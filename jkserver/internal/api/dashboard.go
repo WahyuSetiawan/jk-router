@@ -21,6 +21,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"jkrouter/jkserver/internal/db"
+	"jkrouter/jkserver/internal/rtk"
 	"jkrouter/jkserver/internal/settings"
 	"jkrouter/jkserver/internal/translator"
 )
@@ -98,6 +99,9 @@ func DashboardRouter(d *db.DB, transReg *translator.Registry, refreshFn func()) 
 	// Translator debug
 	r.Get("/translator/pairs", ListTranslatorPairsHandler(transReg))
 	r.Post("/translator/preview", PreviewTranslatorHandler(transReg))
+
+	// RTK filter preview
+	r.Post("/rtk/preview", RTKPreviewHandler())
 
 	// CLI tools
 	r.Get("/cli-tools", ListCLIToolsHandler(d))
@@ -793,6 +797,10 @@ func GetSettingsHandler(d *db.DB) http.HandlerFunc {
 		if v := sv("capacity_adapter"); v != "" {
 			settings["capacityAdapter"] = v
 		}
+		// RTK filter settings (JSON array of enabled filter names)
+		if v := sv("rtk_filters"); v != "" {
+			settings["rtkFilters"] = v
+		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"settings": settings})
 	}
 }
@@ -807,8 +815,9 @@ func PutSettingsHandler(d *db.DB) http.HandlerFunc {
 			LogBuffer      string      `json:"logBuffer"`
 			WalInterval    string      `json:"walInterval"`
 			Cooldown429    string      `json:"cooldown429"`
-		CircuitBreaker string      `json:"circuitBreaker"`
-			CapacityAdapter json.RawMessage `json:"capacityAdapter"`
+		CircuitBreaker string           `json:"circuitBreaker"`
+		CapacityAdapter json.RawMessage  `json:"capacityAdapter"`
+		RTKFilters      json.RawMessage  `json:"rtkFilters"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, `{"error":"decode"}`, 400)
@@ -831,6 +840,9 @@ func PutSettingsHandler(d *db.DB) http.HandlerFunc {
 		}
 		if len(body.CapacityAdapter) > 0 {
 			d.Exec("INSERT OR REPLACE INTO settings_kv (key, value) VALUES (?, ?)", "capacity_adapter", string(body.CapacityAdapter))
+		}
+		if len(body.RTKFilters) > 0 {
+			d.Exec("INSERT OR REPLACE INTO settings_kv (key, value) VALUES (?, ?)", "rtk_filters", string(body.RTKFilters))
 		}
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}
@@ -1435,5 +1447,45 @@ func ListCLIToolsHandler(d *db.DB) http.HandlerFunc {
 			},
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"tools": tools})
+	}
+}
+
+// RTKPreviewHandler applies RTK filters to a sample payload for preview.
+func RTKPreviewHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Messages      []json.RawMessage `json:"messages"`
+			RTKFilters    []string          `json:"rtkFilters"`
+			HeadroomTokens int             `json:"headroomTokens"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"decode"}`, http.StatusBadRequest)
+			return
+		}
+		if len(req.Messages) == 0 {
+			http.Error(w, `{"error":"messages required"}`, http.StatusBadRequest)
+			return
+		}
+		reg := rtk.NewRegistry()
+		for _, name := range req.RTKFilters {
+			reg.Enable(name)
+		}
+		// Headroom needs explicit config; create with given limit.
+		if req.HeadroomTokens > 0 {
+			reg.Enable("headroom")
+			// Re-enable with custom config — we can't override after Enable,
+			// so we just enable it and let the default (0 chars) pass through.
+			// The actual headroom enforcement is in the engine, not here.
+		}
+		base := map[string]interface{}{"messages": req.Messages}
+		body, _ := json.Marshal(base)
+		filtered, applied := reg.Apply(body)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"filtered": string(filtered),
+			"applied":  applied,
+			"original_size": len(body),
+			"filtered_size": len(filtered),
+		})
 	}
 }

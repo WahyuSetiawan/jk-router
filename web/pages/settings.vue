@@ -7,6 +7,25 @@ const saving = ref(false)
 const msg = ref('')
 const msgType = ref<'ok' | 'err'>('ok')
 const rtkStatus = ref<{ enabled: boolean; windowSec: number; saved: number }>({ enabled: true, windowSec: 86400, saved: 0 })
+// Per-filter toggles: ['caveman','ponytail','headroom','system-inject']
+const rtkFilters = ref<string[]>([])
+const rtkFilterLabels: Record<string,string> = {
+  caveman: 'caveman',
+  ponytail: 'ponytail',
+  headroom: 'headroom',
+  'system-inject': 'system-inject',
+}
+const rtkFilterDesc: Record<string,string> = {
+  caveman: 'strip verbose prefixes',
+  ponytail: 'strip comments/whitespace',
+  headroom: 'truncate long msgs',
+  'system-inject': 'inject concise hint',
+}
+function toggleRtkFilter(name: string) {
+  const i = rtkFilters.value.indexOf(name)
+  if (i >= 0) rtkFilters.value.splice(i, 1)
+  else rtkFilters.value.push(name)
+}
 const walInterval = ref(300)   // seconds
 const logBuffer = ref(4096)     // entries
 const cooldown429 = ref(60)     // seconds
@@ -28,6 +47,9 @@ async function load() {
     // Load RTK status from settings
     if (r.settings?.rtkEnabled !== undefined) {
       rtkStatus.value.enabled = r.settings.rtkEnabled
+    }
+    if (r.settings?.rtkFilters) {
+      try { rtkFilters.value = JSON.parse(r.settings.rtkFilters) } catch { /* ignore */ }
     }
     if (r.settings?.rtkWindowSec) {
       rtkStatus.value.windowSec = r.settings.rtkWindowSec
@@ -79,6 +101,7 @@ async function save() {
     payload.logBuffer = String(logBuffer.value)
     payload.cooldown429 = String(cooldown429.value)
     payload.circuitBreaker = String(circuitBreaker.value)
+    payload.rtkFilters = JSON.stringify(rtkFilters.value)
     await fetch('/api/dashboard/settings', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -242,23 +265,16 @@ onMounted(load)
     <!-- RTK Token Saver -->
     <div class="card" style="margin-bottom:.8rem">
       <h3 style="color:var(--jkr-lav);font-size:.95rem">RTK token saver <span class="tag p2">P2</span></h3>
+      <p class="note" style="margin-bottom:.5rem">Filter request bodies before sending to reduce token usage.</p>
       <div class="kv">
-        <dt>caveman</dt><dd>
+        <dt v-for="name in ['caveman','ponytail','headroom','system-inject']" :key="name">
+          {{ rtkFilterLabels[name] || name }}
+          <span class="note" style="margin-left:.3rem;font-size:.65rem">{{ rtkFilterDesc[name] }}</span>
+        </dt>
+        <dd v-for="name in ['caveman','ponytail','headroom','system-inject']" :key="name">
           <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
-            <input type="checkbox" :checked="rtkStatus.enabled" />
-            <span class="note" style="font-size:.75rem">{{ rtkStatus.enabled ? 'on' : 'off' }}</span>
-          </label>
-        </dd>
-        <dt>headroom</dt><dd>
-          <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
-            <input type="checkbox" :checked="rtkStatus.enabled" disabled />
-            <span class="note" style="font-size:.75rem">off</span>
-          </label>
-        </dd>
-        <dt>system-inject</dt><dd>
-          <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
-            <input type="checkbox" :checked="rtkStatus.enabled" />
-            <span class="note" style="font-size:.75rem">on</span>
+            <input type="checkbox" :checked="rtkFilters.includes(name)" @change="toggleRtkFilter(name)" />
+            <span class="note" style="font-size:.75rem">{{ rtkFilters.includes(name) ? 'on' : 'off' }}</span>
           </label>
         </dd>
       </div>

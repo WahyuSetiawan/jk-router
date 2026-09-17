@@ -17,6 +17,7 @@
       <NuxtLink to="/translator" class="nav-link" :class="{ active: route.path.startsWith('/translator') }">{{ t('nav.translator') }}</NuxtLink>
       <NuxtLink to="/cli-tools" class="nav-link" :class="{ active: route.path.startsWith('/cli-tools') }">{{ t('nav.cli-tools') }}</NuxtLink>
       <NuxtLink to="/settings" class="nav-link" :class="{ active: route.path.startsWith('/settings') }">{{ t('nav.settings') }}</NuxtLink>
+      <NuxtLink to="/token-saver" class="nav-link" :class="{ active: route.path.startsWith('/token-saver') }">{{ t('nav.token-saver') }}</NuxtLink>
       <NuxtLink to="/profile" class="nav-link" :class="{ active: route.path.startsWith('/profile') }">{{ t('nav.profile') }}</NuxtLink>
       <div class="lang-switch">
         <button :class="{ active: locale === 'id' }" @click="setLocale('id')">ID</button>
