@@ -25,6 +25,7 @@ import (
 	"jkrouter/jkserver/internal/providers/registry"
 	"jkrouter/jkserver/internal/proxypool"
 	"jkrouter/jkserver/internal/rtk"
+	"jkrouter/jkserver/internal/mcp"
 	"jkrouter/jkserver/internal/translator"
 )
 
@@ -255,6 +256,9 @@ func Router(d *db.DB, transReg *translator.Registry, ul *UsageLogger) chi.Router
 	// Mounted directly (no /v1 prefix) because api.Router is already nested under /v1
 	dbMedia := &mediaDBLoader{db: d}
 	r.Mount("/", media.Router(dbMedia))
+
+	// ── MCP server (Model Context Protocol) ───────────────────────────────
+	r.Mount("/api/mcp", mcp.New(d))
 
 	return r
 }
