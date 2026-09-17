@@ -2,6 +2,7 @@
 package api
 
 import (
+	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
 	"database/sql"
@@ -9,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -56,6 +58,8 @@ func DashboardRouter(d *db.DB, transReg *translator.Registry, refreshFn func()) 
 
 	r.Get("/connections", ListConnectionsHandler(d))
 	r.Post("/connections", CreateConnectionHandler(d))
+	r.Put("/connections/{id}", UpdateConnectionHandler(d))
+	r.Delete("/connections/{id}", DeleteConnectionHandler(d))
 	r.Patch("/connections/{id}/toggle", ToggleConnectionHandler(d))
 	r.Get("/connections/{id}/quota", GetQuotaHandler(d))
 	r.Put("/connections/{id}/quota", UpdateQuotaHandler(d))
@@ -63,6 +67,9 @@ func DashboardRouter(d *db.DB, transReg *translator.Registry, refreshFn func()) 
 	r.Get("/proxy-pools", ListProxyPoolsHandler(d))
 	r.Post("/proxy-pools", CreateProxyPoolHandler(d))
 	r.Delete("/proxy-pools/{id}", DeleteProxyPoolHandler(d))
+	r.Post("/proxy-pools/deploy/vercel", VercelDeployHandler(d))
+	r.Post("/proxy-pools/deploy/cloudflare", CloudflareDeployHandler(d))
+	r.Post("/proxy-pools/deploy/deno", DenoDeployHandler(d))
 
 	r.Get("/combos", ListCombosHandler(d))
 	r.Post("/combos", CreateComboHandler(d))
@@ -349,7 +356,7 @@ func ListConnectionsHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		rows, err := d.Query(`
 			SELECT a.id, a.provider_id, a.label, a.auth_type, a.state,
-			       a.priority, a.created_at, p.name AS provider_name
+			       a.priority, a.created_at, p.name AS provider_name, a.tags
 			FROM accounts a
 			LEFT JOIN providers p ON a.provider_id = p.id
 			ORDER BY a.created_at DESC
@@ -368,6 +375,7 @@ func ListConnectionsHandler(d *db.DB) http.HandlerFunc {
 			State        string `json:"state"`
 			Priority     int    `json:"priority"`
 			CreatedAt    int64  `json:"created_at"`
+			Tags         string `json:"tags"`
 		}
 		var out []C
 		for rows.Next() {
@@ -392,6 +400,7 @@ func CreateConnectionHandler(d *db.DB) http.HandlerFunc {
 			AuthType    string `json:"auth_type"`
 			Priority    int    `json:"priority"`
 			ProxyPoolID *int64 `json:"proxy_pool_id"`
+			Tags        string `json:"tags"`
 		}
 		json.NewDecoder(r.Body).Decode(&req)
 		if req.ProviderID == "" || req.Name == "" {
@@ -422,8 +431,8 @@ func CreateConnectionHandler(d *db.DB) http.HandlerFunc {
 		var id int64
 		d.EnqueueWriteSync(func(q *db.Queue) {
 			res, e := q.DB().Exec(
-				`INSERT INTO accounts (provider_id, label, auth_type, encrypted_key, priority, proxy_pool_id, state) VALUES (?, ?, ?, ?, ?, ?, 'active')`,
-				req.ProviderID, req.Name, authType, encrypted, priority, req.ProxyPoolID,
+				`INSERT INTO accounts (provider_id, label, auth_type, encrypted_key, priority, proxy_pool_id, state, tags) VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`,
+				req.ProviderID, req.Name, authType, encrypted, priority, req.ProxyPoolID, req.Tags,
 			)
 			if e != nil {
 				http.Error(w, fmt.Sprintf(`{"error":"insert: %v"}`, e), 500)
@@ -453,6 +462,55 @@ func ToggleConnectionHandler(d *db.DB) http.HandlerFunc {
 		})
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"id":%s,"state":"%s"}`, id, newState)
+	}
+}
+
+// UpdateConnectionHandler updates an account's fields.
+func UpdateConnectionHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		var req struct {
+			Name        string `json:"name"`
+			ProxyPoolID *int64 `json:"proxy_pool_id"`
+			Tags        string `json:"tags"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"decode"}`, 400)
+			return
+		}
+		d.EnqueueWriteSync(func(q *db.Queue) {
+			setParts := []string{}
+			args := []interface{}{}
+			if req.Name != "" {
+				setParts = append(setParts, "label=?")
+				args = append(args, req.Name)
+			}
+			if req.ProxyPoolID != nil {
+				setParts = append(setParts, "proxy_pool_id=?")
+				args = append(args, *req.ProxyPoolID)
+			}
+			if req.Tags != "" {
+				setParts = append(setParts, "tags=?")
+				args = append(args, req.Tags)
+			}
+			if len(setParts) > 0 {
+				args = append(args, id)
+				q.DB().Exec(fmt.Sprintf("UPDATE accounts SET %s WHERE id=?", joinStrings(setParts, ",")), args...)
+			}
+		})
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+// DeleteConnectionHandler deletes an account.
+func DeleteConnectionHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		d.EnqueueWriteSync(func(q *db.Queue) {
+			q.DB().Exec(`DELETE FROM accounts WHERE id=?`, id)
+		})
+		w.WriteHeader(http.StatusOK)
 	}
 }
 
@@ -545,6 +603,382 @@ func DeleteProxyPoolHandler(d *db.DB) http.HandlerFunc {
 			q.DB().Exec(`DELETE FROM proxy_pools WHERE id=?`, id)
 		})
 		w.WriteHeader(http.StatusOK)
+	}
+}
+
+// ─────────────────── Proxy Relay Deploy Handlers ────────────────────────────
+
+// VercelDeployHandler deploys a relay function to Vercel and creates a proxy pool.
+func VercelDeployHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		const vercelAPI = "https://api.vercel.com"
+		relayCode := `export const config = { runtime: "edge" };
+export default async function handler(req) {
+  const target = req.headers.get("x-relay-target");
+  const relayPath = req.headers.get("x-relay-path") || "/";
+  if (!target) {
+    return new Response(JSON.stringify({ error: "Missing x-relay-target header" }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  const targetUrl = target.replace(/\/$/, "") + relayPath;
+  const headers = new Headers(req.headers);
+  headers.delete("x-relay-target");
+  headers.delete("x-relay-path");
+  headers.delete("host");
+  const response = await fetch(targetUrl, {
+    method: req.method,
+    headers,
+    body: req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
+    duplex: "half",
+  });
+  return new Response(response.body, { status: response.status, headers: response.headers });
+}`
+		var req struct {
+			VercelToken string `json:"vercelToken"`
+			Name        string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.VercelToken == "" {
+			http.Error(w, `{"error":"vercelToken required"}`, 400)
+			return
+		}
+		projName := strings.TrimSpace(req.Name)
+		if projName == "" {
+			projName = "relay-" + strings.TrimPrefix(time.Now().Format("20060102150405"), "2")
+		}
+		// Create deployment
+		deployBody, _ := json.Marshal(map[string]interface{}{
+			"name": projName, "target": "production",
+			"files": []map[string]string{
+				{"file": "api/relay.js", "data": relayCode},
+				{"file": "package.json", "data": `{"name":"` + projName + `","version":"1.0.0"}`},
+				{"file": "vercel.json", "data": `{"rewrites":[{"source":"/(.*)","destination":"/api/relay"}]}`},
+			},
+			"projectSettings": map[string]interface{}{"framework": nil},
+		})
+		deployReq, _ := http.NewRequest("POST", vercelAPI+"/v13/deployments", bytes.NewReader(deployBody))
+		deployReq.Header.Set("Authorization", "Bearer "+req.VercelToken)
+		deployReq.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(deployReq)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), 500)
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			body, _ := io.ReadAll(resp.Body)
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, string(body)), resp.StatusCode)
+			return
+		}
+		var deployResult map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&deployResult)
+		// Poll for ready
+		depID, _ := deployResult["id"].(string)
+		var deployURL string
+		for i := 0; i < 40; i++ {
+			time.Sleep(3 * time.Second)
+			pollReq, _ := http.NewRequest("GET", vercelAPI+"/v13/deployments/"+depID, nil)
+			pollReq.Header.Set("Authorization", "Bearer "+req.VercelToken)
+			pollResp, err := http.DefaultClient.Do(pollReq)
+			if err == nil && pollResp.StatusCode == 200 {
+				var pr map[string]interface{}
+				json.NewDecoder(pollResp.Body).Decode(&pr)
+				pollResp.Body.Close()
+				if s, ok := pr["readyState"].(string); ok {
+					if s == "READY" {
+						deployURL = "https://" + pr["url"].(string)
+						break
+					}
+					if s == "ERROR" || s == "CANCELED" {
+						http.Error(w, `{"error":"deployment failed"}`, 502)
+						return
+					}
+				}
+			}
+		}
+		if deployURL == "" {
+			http.Error(w, `{"error":"deployment timed out"}`, 504)
+			return
+		}
+		// Disable deployment protection
+		projID, _ := deployResult["projectId"].(string)
+		if projID == "" {
+			projID = projName
+		}
+		protBody, _ := json.Marshal(map[string]interface{}{"ssoProtection": nil})
+		protReq, _ := http.NewRequest("PATCH", vercelAPI+"/v9/projects/"+projID, bytes.NewReader(protBody))
+		protReq.Header.Set("Authorization", "Bearer "+req.VercelToken)
+		protReq.Header.Set("Content-Type", "application/json")
+		http.DefaultClient.Do(protReq)
+		// Save to DB
+		var poolID int64
+		d.EnqueueWriteSync(func(q *db.Queue) {
+			res, e := q.DB().Exec(
+				`INSERT INTO proxy_pools (name, ptype, proxy_url, is_active, strict_proxy) VALUES (?, ?, ?, 1, 0)`,
+				projName, "relay", deployURL,
+			)
+			if e == nil {
+				poolID, _ = res.LastInsertId()
+			}
+		})
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"proxy_pool_id": poolID, "deploy_url": deployURL})
+	}
+}
+
+// CloudflareDeployHandler deploys a relay worker to Cloudflare and creates a proxy pool.
+func CloudflareDeployHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		relayCode := `export default {
+  async fetch(request, env, ctx) {
+    const target = request.headers.get("x-relay-target");
+    const relayPath = request.headers.get("x-relay-path") || "/";
+    if (!target) {
+      return new Response(JSON.stringify({ error: "Missing x-relay-target header" }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    const targetUrl = target.replace(/\/$/, "") + relayPath;
+    const newHeaders = new Headers(request.headers);
+    newHeaders.delete("x-relay-target");
+    newHeaders.delete("x-relay-path");
+    newHeaders.delete("host");
+    const init = { method: request.method, headers: newHeaders };
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      init.body = request.body;
+      init.duplex = "half";
+    }
+    try {
+      const response = await fetch(targetUrl, init);
+      return new Response(response.body, { status: response.status, headers: response.headers });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: e.message }), { status: 502 });
+    }
+  },
+}`
+		var req struct {
+			AccountID string `json:"accountId"`
+			APIToken  string `json:"apiToken"`
+			Name      string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.AccountID == "" || req.APIToken == "" {
+			http.Error(w, `{"error":"accountId and apiToken required"}`, 400)
+			return
+		}
+		projName := strings.TrimSpace(req.Name)
+		if projName == "" {
+			projName = "relay-" + strings.TrimPrefix(time.Now().Format("20060102150405"), "2")
+		}
+		// Upload worker script (multipart)
+		meta := `{"main_module":"index.js","compatibility_date":"2024-03-20","observability":{"enabled":true}}`
+		bodyBuf := &bytes.Buffer{}
+		writer := multipart.NewWriter(bodyBuf)
+		writer.WriteField("metadata", meta)
+		part, _ := writer.CreateFormFile("index.js", "index.js")
+		part.Write([]byte(relayCode))
+		writer.Close()
+		uploadURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/workers/scripts/%s", req.AccountID, projName)
+		uploadReq, _ := http.NewRequest("PUT", uploadURL, bodyBuf)
+		uploadReq.Header.Set("Authorization", "Bearer "+req.APIToken)
+		uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+		uploadResp, err := http.DefaultClient.Do(uploadReq)
+		if err != nil || uploadResp.StatusCode >= 400 {
+			var errBody string
+			if uploadResp != nil {
+				b, _ := io.ReadAll(uploadResp.Body)
+				errBody = string(b)
+			}
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, errBody), 502)
+			return
+		}
+		uploadResp.Body.Close()
+		// Enable subdomain
+		subURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/workers/scripts/%s/subdomain", req.AccountID, projName)
+		subBody, _ := json.Marshal(map[string]bool{"enabled": true})
+		subReq, _ := http.NewRequest("POST", subURL, bytes.NewReader(subBody))
+		subReq.Header.Set("Authorization", "Bearer "+req.APIToken)
+		subReq.Header.Set("Content-Type", "application/json")
+		http.DefaultClient.Do(subReq)
+		// Get subdomain
+		subdomainReq, _ := http.NewRequest("GET", fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/workers/subdomain", req.AccountID), nil)
+		subdomainReq.Header.Set("Authorization", "Bearer "+req.APIToken)
+		subdomainResp, err := http.DefaultClient.Do(subdomainReq)
+		var deployURL string
+		if err == nil && subdomainResp.StatusCode == 200 {
+			var subData map[string]interface{}
+			json.NewDecoder(subdomainResp.Body).Decode(&subData)
+			subdomainResp.Body.Close()
+			if result, ok := subData["result"].(map[string]interface{}); ok {
+				if sub, ok := result["subdomain"].(string); ok {
+					deployURL = "https://" + projName + "." + sub + ".workers.dev"
+				}
+			}
+		}
+		if deployURL == "" {
+			http.Error(w, `{"error":"failed to get workers.dev subdomain"}`, 502)
+			return
+		}
+		var poolID int64
+		d.EnqueueWriteSync(func(q *db.Queue) {
+			res, e := q.DB().Exec(
+				`INSERT INTO proxy_pools (name, ptype, proxy_url, is_active, strict_proxy) VALUES (?, ?, ?, 1, 0)`,
+				projName, "relay", deployURL,
+			)
+			if e == nil {
+				poolID, _ = res.LastInsertId()
+			}
+		})
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"proxy_pool_id": poolID, "deploy_url": deployURL})
+	}
+}
+
+// DenoDeployHandler deploys a relay to Deno Deploy and creates a proxy pool.
+func DenoDeployHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		relayCode := `Deno.serve(async (request) => {
+  const target = request.headers.get("x-relay-target");
+  const relayPath = request.headers.get("x-relay-path") || "/";
+  if (!target) {
+    return new Response(JSON.stringify({ error: "Missing x-relay-target header" }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  const targetUrl = target.replace(/\/$/, "") + relayPath;
+  const newHeaders = new Headers(request.headers);
+  newHeaders.delete("x-relay-target");
+  newHeaders.delete("x-relay-path");
+  newHeaders.delete("host");
+  const init = { method: request.method, headers: newHeaders };
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    init.body = request.body;
+  }
+  try {
+    const response = await fetch(targetUrl, init);
+    return new Response(response.body, { status: response.status, headers: response.headers });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), { status: 502 });
+  }
+});`
+		var req struct {
+			DenoToken  string `json:"denoToken"`
+			OrgDomain  string `json:"orgDomain"`
+			Name       string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DenoToken == "" || req.OrgDomain == "" {
+			http.Error(w, `{"error":"denoToken and orgDomain required"}`, 400)
+			return
+		}
+		projName := strings.TrimSpace(req.Name)
+		if projName == "" {
+			projName = "relay-" + strings.TrimPrefix(time.Now().Format("20060102150405"), "2")
+		}
+		headers := map[string]string{"Authorization": "Bearer " + req.DenoToken, "Content-Type": "application/json"}
+		// Create app
+		createBody, _ := json.Marshal(map[string]interface{}{
+			"slug": projName,
+			"labels": map[string]string{"custom.kind": "jkrouter-relay"},
+			"config": map[string]interface{}{
+				"install": "deno install",
+				"runtime": map[string]string{"type": "dynamic", "entrypoint": "main.ts"},
+			},
+		})
+		createReq, _ := http.NewRequest("POST", "https://api.deno.com/v2/apps", bytes.NewReader(createBody))
+		for k, v := range headers {
+			createReq.Header.Set(k, v)
+		}
+		createResp, err := http.DefaultClient.Do(createReq)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), 500)
+			return
+		}
+		defer createResp.Body.Close()
+		if createResp.StatusCode == 409 {
+			http.Error(w, fmt.Sprintf(`{"error":"app %s already exists"}`, projName), 409)
+			return
+		}
+		if createResp.StatusCode >= 400 {
+			body, _ := io.ReadAll(createResp.Body)
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, string(body)), createResp.StatusCode)
+			return
+		}
+		var appInfo map[string]interface{}
+		json.NewDecoder(createResp.Body).Decode(&appInfo)
+		appID, _ := appInfo["id"].(string)
+		// Deploy
+		deployBody, _ := json.Marshal(map[string]interface{}{
+			"assets": map[string]interface{}{
+				"main.ts": map[string]string{"kind": "file", "content": relayCode, "encoding": "utf-8"},
+			},
+		})
+		deployReq, _ := http.NewRequest("POST", fmt.Sprintf("https://api.deno.com/v2/apps/%s/deploy", appID), bytes.NewReader(deployBody))
+		for k, v := range headers {
+			deployReq.Header.Set(k, v)
+		}
+		deployResp, err := http.DefaultClient.Do(deployReq)
+		if err != nil || deployResp.StatusCode >= 400 {
+			var errBody string
+			if deployResp != nil {
+				b, _ := io.ReadAll(deployResp.Body)
+				errBody = string(b)
+			}
+			// Cleanup: delete app
+			cleanReq, _ := http.NewRequest("DELETE", fmt.Sprintf("https://api.deno.com/v2/apps/%s", appID), nil)
+			http.DefaultClient.Do(cleanReq)
+			http.Error(w, fmt.Sprintf(`{"error":"deploy failed: %s"}`, errBody), 502)
+			return
+		}
+		defer deployResp.Body.Close()
+		var revision map[string]interface{}
+		json.NewDecoder(deployResp.Body).Decode(&revision)
+		revID, _ := revision["id"].(string)
+		// Poll until succeeded
+		var deployURL string
+		for i := 0; i < 30; i++ {
+			time.Sleep(2 * time.Second)
+			statusReq, _ := http.NewRequest("GET", fmt.Sprintf("https://api.deno.com/v2/revisions/%s", revID), nil)
+			statusReq.Header.Set("Authorization", "Bearer "+req.DenoToken)
+			statusResp, err := http.DefaultClient.Do(statusReq)
+			if err == nil && statusResp.StatusCode == 200 {
+				var sr map[string]interface{}
+				json.NewDecoder(statusResp.Body).Decode(&sr)
+				statusResp.Body.Close()
+				if s, ok := sr["status"].(string); ok {
+					if s == "succeeded" {
+						orgSlug := strings.SplitN(req.OrgDomain, ".", 2)[0]
+						deployURL = "https://" + projName + "." + orgSlug + ".deno.net"
+						break
+					}
+					if s == "failed" {
+						cleanReq, _ := http.NewRequest("DELETE", fmt.Sprintf("https://api.deno.com/v2/apps/%s", appID), nil)
+			http.DefaultClient.Do(cleanReq)
+						http.Error(w, `{"error":"deployment failed"}`, 502)
+						return
+					}
+				}
+			}
+		}
+		if deployURL == "" {
+			cleanReq, _ := http.NewRequest("DELETE", fmt.Sprintf("https://api.deno.com/v2/apps/%s", appID), nil)
+			http.DefaultClient.Do(cleanReq)
+			http.Error(w, `{"error":"deployment timed out"}`, 504)
+			return
+		}
+		var poolID int64
+		d.EnqueueWriteSync(func(q *db.Queue) {
+			res, e := q.DB().Exec(
+				`INSERT INTO proxy_pools (name, ptype, proxy_url, is_active, strict_proxy) VALUES (?, ?, ?, 1, 0)`,
+				projName, "relay", deployURL,
+			)
+			if e == nil {
+				poolID, _ = res.LastInsertId()
+			}
+		})
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"proxy_pool_id": poolID, "deploy_url": deployURL})
 	}
 }
 
