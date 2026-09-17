@@ -252,13 +252,13 @@ func Router(d *db.DB, transReg *translator.Registry, ul *UsageLogger) chi.Router
 		fmt.Fprintf(w, `{"ok":true,"provider":"%s"}`, provider)
 	})
 
+	// ── MCP server (Model Context Protocol) ───────────────────────────────
+	r.Mount("/api/mcp", mcp.New(d))
+
 	// ── Media routes (TTS / STT / Image / Video) ──────────────────────────
 	// Mounted directly (no /v1 prefix) because api.Router is already nested under /v1
 	dbMedia := &mediaDBLoader{db: d}
 	r.Mount("/", media.Router(dbMedia))
-
-	// ── MCP server (Model Context Protocol) ───────────────────────────────
-	r.Mount("/api/mcp", mcp.New(d))
 
 	return r
 }
