@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from '~/composables/useI18n'
+const { t } = useI18n()
 import { ref, onMounted } from 'vue'
 
 const connections = ref<any[]>([])
@@ -41,7 +43,7 @@ function openAdd(pid?: string) {
 
 async function create() {
   if (!form.value.label || !form.value.provider_id) {
-    setMsg('Label dan provider wajib diisi', 'err')
+    setMsg(t('common.error'), 'err')
     return
   }
   try {
@@ -68,7 +70,7 @@ async function toggle(a: any) {
 }
 
 async function del(a: any) {
-  if (!confirm(`Hapus akun "${a.label}"?`)) return
+  if (!confirm(`t('providers.delete') + ' akun "${a.label}"?`)) return
   await fetch(`/api/dashboard/media-connections/${a.id}`, { method: 'DELETE' })
   await load()
 }
@@ -103,7 +105,7 @@ onMounted(() => { load(); loadRegistries() })
       </h2>
       <small style="color:var(--jkr-mut);font-size:.75rem">TTS · STT · Image · Video accounts</small>
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-        <input v-model="search" class="search" style="flex:1;max-width:200px" placeholder="Cari akun…" />
+        <input v-model="search" class="search" style="flex:1;max-width:200px" placeholder="{{ t('providers.search') }}" />
         <button class="btn ghost" @click="load()">↻ Refresh</button>
         <button class="btn" @click="openAdd()">+ Akun Media</button>
       </div>
@@ -117,7 +119,7 @@ onMounted(() => { load(); loadRegistries() })
     <!-- Add modal -->
     <div v-if="showAdd" class="modal-overlay" @click.self="showAdd=false">
       <div class="modal">
-        <h3>Tambah Akun Media</h3>
+        <h3>{{ t('media.add') }}</h3>
         <div class="kv" style="margin-bottom:.8rem">
           <dt>Provider</dt>
           <dd>
@@ -128,20 +130,20 @@ onMounted(() => { load(); loadRegistries() })
               </option>
             </select>
           </dd>
-          <dt>Label</dt><dd><input v-model="form.label" class="input" placeholder="e.g. work-key" /></dd>
+          <dt>{{ t('providers.label') }}</dt><dd><input v-model="form.label" class="input" placeholder="e.g. work-key" /></dd>
           <dt>Auth Type</dt>
           <dd>
             <select v-model="form.auth_type" class="select">
               <option value="api_key">API Key</option>
             </select>
           </dd>
-          <dt v-if="form.auth_type==='api_key'">API Secret</dt>
+          <dt v-if="form.auth_type==='api_key'">t('providers.api_key')</dt>
           <dd v-if="form.auth_type==='api_key'"><input v-model="form.secret" class="input" type="password" placeholder="sk-..." /></dd>
-          <dt>Priority</dt><dd><input v-model.number="form.priority" class="input" type="number" min="0" max="100" /></dd>
+          <dt>{{ t('providers.priority') }}</dt><dd><input v-model.number="form.priority" class="input" type="number" min="0" max="100" /></dd>
         </div>
         <div style="display:flex;gap:.5rem">
-          <button class="btn" @click="create">Simpan</button>
-          <button class="btn ghost" @click="showAdd=false">Batal</button>
+          <button class="btn" @click="create">{{ t('providers.save') }}</button>
+          <button class="btn ghost" @click="showAdd=false">{{ t('providers.cancel') }}</button>
         </div>
       </div>
     </div>
@@ -151,9 +153,9 @@ onMounted(() => { load(); loadRegistries() })
       <thead>
         <tr>
           <th>Provider</th>
-          <th>Label</th>
+          <th>{{ t('providers.label') }}</th>
           <th>Auth</th>
-          <th>Priority</th>
+          <th>{{ t('providers.priority') }}</th>
           <th>Status</th>
           <th></th>
         </tr>

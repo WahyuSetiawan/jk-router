@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from '~/composables/useI18n'
+const { t } = useI18n()
 const stats = ref({ requests: 0, tokensIn: 0, cost: 0, p95Latency: 0 })
 const recent = ref<any[]>([])
 const loading = ref(true)
@@ -15,8 +17,6 @@ async function load() {
     if (c.requests !== undefined) {
       stats.value = { requests: c.requests, tokensIn: c.tokens_in, cost: c.cost, p95Latency: c.avg_ms }
     } else {
-      // Fallback: compute from raw data
-      const success = list.filter(x => x.status === 'success')
       stats.value = {
         requests: list.length,
         tokensIn: list.reduce((s: number, x: any) => s + (x.tok_in || 0), 0),
@@ -33,22 +33,22 @@ onMounted(load)
 <template>
   <div>
     <div class="page-head">
-      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0"><span class="tag p1">P1</span> Dashboard</h2>
-      <small style="color:var(--jkr-mut);font-size:.75rem">Ringkasan penggunaan & request terakhir</small>
+      <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0"><span class="tag p1">P1</span> {{ t('dashboard.title') }}</h2>
+      <small style="color:var(--jkr-mut);font-size:.75rem">{{ t('dashboard.subtitle') }}</small>
     </div>
-    <div v-if="loading" class="note" style="padding:2rem;text-align:center">Loading…</div>
+    <div v-if="loading" class="note" style="padding:2rem;text-align:center">{{ t('dashboard.loading') }}</div>
     <template v-else>
       <div class="grid4" style="margin-bottom:1rem">
-        <div class="card stat"><div class="n">{{ stats.requests }}</div><div class="l">requests / 7d</div></div>
-        <div class="card stat"><div class="n">{{ stats.tokensIn.toLocaleString() }}</div><div class="l">tokens in</div></div>
-        <div class="card stat"><div class="n">${{ typeof stats.cost === 'number' ? stats.cost.toFixed(4) : stats.cost }}</div><div class="l">cost / 7d</div></div>
-        <div class="card stat"><div class="n">{{ stats.p95Latency }}ms</div><div class="l">avg latency</div></div>
+        <div class="card stat"><div class="n">{{ stats.requests }}</div><div class="l">{{ t('dashboard.requests') }}</div></div>
+        <div class="card stat"><div class="n">{{ stats.tokensIn.toLocaleString() }}</div><div class="l">{{ t('dashboard.tokens') }}</div></div>
+        <div class="card stat"><div class="n">${{ typeof stats.cost === 'number' ? stats.cost.toFixed(4) : stats.cost }}</div><div class="l">{{ t('dashboard.cost') }}</div></div>
+        <div class="card stat"><div class="n">{{ stats.p95Latency }}ms</div><div class="l">{{ t('dashboard.latency') }}</div></div>
       </div>
       <div class="card" style="margin-top:.5rem">
-        <h3>Recent Requests</h3>
+        <h3>{{ t('dashboard.recent') }}</h3>
         <table class="table">
           <thead><tr>
-            <th>Time</th><th>Model</th><th>Provider</th><th>Status</th><th>Latency</th><th>Tokens</th>
+            <th>{{ t('usage.date') }}</th><th>Model</th><th>Provider</th><th>Status</th><th>Latency</th><th>Tokens</th>
           </tr></thead>
           <tbody>
             <tr v-for="r in recent" :key="r.request_id">
@@ -59,7 +59,7 @@ onMounted(load)
               <td>{{ r.latency_ms }}ms</td>
               <td class="font-mono" style="font-size:.75rem">{{ r.tok_in ?? 0 }}+{{ r.tok_out ?? 0 }}</td>
             </tr>
-            <tr v-if="recent.length===0"><td colspan="6" class="note" style="text-align:center;padding:1rem">No usage data yet</td></tr>
+            <tr v-if="recent.length===0"><td colspan="6" class="note" style="text-align:center;padding:1rem">{{ t('dashboard.loading') }}</td></tr>
           </tbody>
         </table>
       </div>

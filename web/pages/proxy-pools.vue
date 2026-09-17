@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from '~/composables/useI18n'
+const { t } = useI18n()
 import { ref, onMounted } from 'vue'
 const pools = ref<any[]>([])
 const accounts = ref<any[]>([])
@@ -27,7 +29,7 @@ async function create() {
   await load()
 }
 async function del(id: number) {
-  if (!confirm('Hapus pool ini?')) return
+  if (!confirm(t('proxypools.delete') + '?')) return
   await fetch(`/api/dashboard/proxy-pools/${id}`, { method: 'DELETE' })
   await load()
 }
@@ -88,7 +90,7 @@ onMounted(load)
           </dd>
         </div>
         <div style="display:flex;gap:.5rem;margin-top:.5rem">
-          <button class="btn ghost btn-sm" @click="load">Test</button>
+          <button class="btn ghost btn-sm" @click="load">t('proxypools.test')</button>
           <button class="btn ghost btn-sm" style="color:var(--jkr-red)" @click="del(p.id)">Delete</button>
         </div>
         <p class="note" style="font-size:.7rem">last test {{ p.last_tested ? new Date(p.last_tested * 1000).toLocaleString() : 'never' }}</p>

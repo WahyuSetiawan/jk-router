@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from '~/composables/useI18n'
+const { t } = useI18n()
 import { ref, onMounted } from 'vue'
 const settings = ref({ port: 20128, bind: '127.0.0.1', dataDir: '~/.jkrouter' })
 const saving = ref(false)
@@ -172,7 +174,7 @@ onMounted(load)
       <button class="btn" @click="save" :disabled="saving">{{ saving ? 'Saving…' : 'Save' }}</button>
     </div>
 
-    <!-- Backup & Restore -->
+    <!-- t('settings.backup') -->
     <div class="card" style="margin-bottom:.8rem">
       <h3 style="color:var(--jkr-lav);font-size:.95rem">Backup & Restore (§4.3)</h3>
       <div class="kv">
@@ -262,7 +264,7 @@ onMounted(load)
       </div>
     </div>
 
-    <!-- Capacity Adapter -->
+    <!-- t('settings.capacity_adapter') -->
     <div class="card" style="margin-bottom:.8rem">
       <h3 style="color:var(--jkr-lav);font-size:.95rem">Capacity Adapter (§4.2) <span class="tag p1">P1</span></h3>
       <div class="kv">

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from '~/composables/useI18n'
+const { t } = useI18n()
 import { ref, onMounted, onUnmounted } from 'vue'
 
 const logs = ref<any[]>([])
@@ -47,7 +49,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 
     <div v-if="loading && logs.length===0" class="note" style="text-align:center;padding:2rem">Memuat…</div>
 
-    <div v-else-if="logs.length===0" class="note" style="text-align:center;padding:2rem">Belum ada log request.</div>
+    <div v-else-if="logs.length===0" class="note" style="text-align:center;padding:2rem">t('usage.loading')</div>
 
     <div v-else class="card" style="overflow-x:auto">
       <table class="table">

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from '~/composables/useI18n'
+const { t } = useI18n()
 import { ref, computed, onMounted } from 'vue'
 
 const providers = ref<any[]>([])
@@ -79,7 +81,7 @@ async function saveEdit(a: any) {
 function cancelEdit() { editingAccount.value = null }
 
 async function deleteAccount(id: number) {
-  if (!confirm('Hapus akun ini?')) return
+  if (!confirm(t('providers.delete') + '?')) return
   await fetch(`/api/dashboard/connections/${id}`, { method: 'DELETE' })
   await load()
 }
@@ -160,10 +162,10 @@ onMounted(load)
     <!-- Add Provider Modal -->
     <div v-if="showAddProvider" class="modal-overlay" @click.self="showAddProvider=false">
       <div class="modal">
-        <h3>Tambah Provider Baru</h3>
+        <h3>{{ t('providers.add_provider') }}</h3>
         <div class="kv" style="margin-bottom:.8rem">
           <dt>Nama ID</dt><dd><input v-model="providerForm.name" class="input" placeholder="e.g. openai" /></dd>
-          <dt>Label Tampilan</dt><dd><input v-model="providerForm.label" class="input" placeholder="e.g. Work Account" /></dd>
+          <dt>{{ t('providers.label') }}</dt><dd><input v-model="providerForm.label" class="input" placeholder="e.g. Work Account" /></dd>
           <dt>Auth Type</dt><dd>
             <select v-model="providerForm.auth_type" class="select">
               <option value="api_key">API Key</option><option value="oauth">OAuth</option>
@@ -172,8 +174,8 @@ onMounted(load)
           <dt>Base URL</dt><dd><input v-model="providerForm.base_url" class="input" placeholder="https://api.openai.com" /></dd>
         </div>
         <div style="display:flex;gap:.5rem">
-          <button class="btn" @click="createProvider">Simpan</button>
-          <button class="btn ghost" @click="showAddProvider=false">Batal</button>
+          <button class="btn" @click="createProvider">{{ t('providers.save') }}</button>
+          <button class="btn ghost" @click="showAddProvider=false">{{ t('providers.cancel') }}</button>
         </div>
       </div>
     </div>
@@ -181,9 +183,9 @@ onMounted(load)
     <!-- Add Account Modal -->
     <div v-if="showAddAccount" class="modal-overlay" @click.self="showAddAccount=false">
       <div class="modal">
-        <h3>Tambah Akun</h3>
+        <h3>{{ t('providers.add_account') }}</h3>
         <div class="kv" style="margin-bottom:.8rem">
-          <dt>Label</dt><dd><input v-model="accountForm.label" class="input" placeholder="e.g. work-mail" /></dd>
+          <dt>{{ t('providers.label') }}</dt><dd><input v-model="accountForm.label" class="input" placeholder="e.g. work-mail" /></dd>
           <dt>Auth Type</dt><dd>
             <select v-model="accountForm.auth_type" class="select">
               <option value="api_key">API Key</option><option value="oauth">OAuth</option>
@@ -191,17 +193,17 @@ onMounted(load)
           </dd>
           <dt v-if="accountForm.auth_type==='api_key'">API Secret</dt>
           <dd v-if="accountForm.auth_type==='api_key'"><input v-model="accountForm.secret" class="input" placeholder="sk-..." /></dd>
-          <dt>Proxy Pool</dt><dd>
+          <dt>{{ t('providers.proxy_pool') }}</dt><dd>
             <select v-model="accountForm.proxy_pool_id" class="select">
-              <option :value="null">Tidak ada</option>
+              <option :value="null">{{ t('providers.none') }}</option>
               <option v-for="pp in proxyPools" :key="pp.id" :value="pp.id">{{ pp.name }}</option>
             </select>
           </dd>
-          <dt>Priority</dt><dd><input v-model.number="accountForm.priority" class="input" type="number" min="0" max="100" /></dd>
+          <dt>{{ t('providers.priority') }}</dt><dd><input v-model.number="accountForm.priority" class="input" type="number" min="0" max="100" /></dd>
         </div>
         <div style="display:flex;gap:.5rem">
-          <button class="btn" @click="createAccount">Simpan</button>
-          <button class="btn ghost" @click="showAddAccount=false">Batal</button>
+          <button class="btn" @click="createAccount">{{ t('providers.save') }}</button>
+          <button class="btn ghost" @click="showAddAccount=false">{{ t('providers.cancel') }}</button>
         </div>
       </div>
     </div>
@@ -271,7 +273,7 @@ onMounted(load)
               <td>
                 <template v-if="editingAccount === a.id">
                   <select v-model="editForm[a.id].proxy_pool_id" class="select" style="width:120px">
-                    <option :value="null">Tidak ada</option>
+                    <option :value="null">{{ t('providers.none') }}</option>
                     <option v-for="pp in proxyPools" :key="pp.id" :value="pp.id">{{ pp.name }}</option>
                   </select>
                 </template>

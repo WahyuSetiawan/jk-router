@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from '~/composables/useI18n'
+const { t } = useI18n()
 import { ref, onMounted } from 'vue'
 const form = ref({ current: '', new: '', confirm: '' })
 const msg = ref('')
@@ -45,7 +47,7 @@ onMounted(load)
       <small style="color:var(--jkr-mut);font-size:.75rem">Dashboard auth lokal (mirror src/app/login 9Router, bcrypt)</small>
     </div>
     <div class="card" style="max-width:380px">
-      <h3>{{ firstRun ? 'Set Dashboard Password' : 'Change Password' }}</h3>
+      <h3>{{ firstRun ? 'Set Dashboard Password' : t('profile.change_password') }}</h3>
       <div v-if="msg" :style="{color: msgType==='ok' ? 'var(--jkr-grn)' : 'var(--jkr-red)', marginBottom: '.8rem'}" class="note">{{ msg }}</div>
       <div class="kv" style="margin-bottom:.8rem">
         <dt>Current</dt><dd><input v-model="form.current" type="password" class="input" placeholder="••••••••" /></dd>

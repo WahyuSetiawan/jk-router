@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from '~/composables/useI18n'
+const { t } = useI18n()
 import { ref, computed, onMounted, watch } from 'vue'
 import { Chart, registerables } from 'chart.js'
 Chart.register(...registerables)
@@ -16,7 +18,7 @@ const page = ref(1)
 const pageSize = 50
 const chartInstance = ref<any>(null)
 
-// Filtered logs
+// t('usage.filter')ed logs
 const filteredLogs = computed(() => {
   return logs.value.filter(l => {
     if (filterProvider.value && l.provider !== filterProvider.value) return false

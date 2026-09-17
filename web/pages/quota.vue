@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from '~/composables/useI18n'
+const { t } = useI18n()
 import { ref, onMounted, computed } from 'vue'
 
 const connections = ref<any[]>([])
@@ -60,7 +62,7 @@ function timeLeft(q: QuotaData): string {
   return `${m}m`
 }
 
-function formatWindow(sec: number): string {
+function formatTimeLeft(sec: number): string {
   if (sec >= 86400) return `${sec / 86400} hari`
   if (sec >= 3600) return `${sec / 3600} jam`
   return `${sec / 60} menit`

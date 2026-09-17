@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from '~/composables/useI18n'
+const { t } = useI18n()
 import { ref, onMounted } from 'vue'
 
 const combos = ref<any[]>([])
@@ -43,7 +45,7 @@ async function create() {
 }
 
 async function remove(id: number) {
-  if (!confirm('Hapus combo ini?')) return
+  if (!confirm(t('combos.delete') + '?')) return
   await fetch(`/api/dashboard/combos/${id}`, { method: 'DELETE' })
   await load()
 }
@@ -109,14 +111,14 @@ onMounted(load)
   <div>
     <div class="page-head">
       <h2 style="color:var(--jkr-lav);font-size:1.1rem;margin:0"><span class="tag p1">P1</span> /dashboard/combos</h2>
-      <small style="color:var(--jkr-mut);font-size:.75rem">Model-combo fallback chain: urut provider/model yang dicoba saat gagal</small>
+      <small style="color:var(--jkr-mut);font-size:.75rem">t('combos.desc')</small>
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-        <input v-model="search" class="search" style="flex:1;max-width:200px" placeholder="Cari combo…" />
+        <input v-model="search" class="search" style="flex:1;max-width:200px" placeholder="{{ t('providers.search') }}" />
         <button class="btn ghost" :disabled="!!refreshStatus" @click="refreshModels">
           ↻ Refresh Models
         </button>
         <span v-if="refreshStatus" class="note" style="font-size:.75rem">{{ refreshStatus }}</span>
-        <button class="btn" @click="openAdd">+ Combo</button>
+        <button class="btn" @click="openAdd">t('combos.add')</button>
       </div>
     </div>
 
@@ -140,7 +142,7 @@ onMounted(load)
           <span class="chip" style="background:#c6a0f6;color:#1e2030;font-size:.7rem">video</span>
         </div>
         <div class="note" style="font-size:.75rem">
-          Model tanpa capability yang cocok akan tetap digunakan sebagai fallback terakhir.
+          t('combos.fallback_note') yang cocok akan tetap digunakan sebagai fallback terakhir.
           Pengurutan otomatis dilakukan oleh engine berdasarkan kebutuhan request.
         </div>
       </div>
@@ -149,7 +151,7 @@ onMounted(load)
     <!-- Add Combo Modal -->
     <div v-if="showAdd" class="modal-overlay" @click.self="showAdd=false">
       <div class="modal">
-        <h3>Tambah Combo</h3>
+        <h3>t('combos.add')</h3>
         <div class="kv" style="margin-bottom:.8rem">
           <dt>Nama Combo</dt><dd><input v-model="form.name" class="input" placeholder="e.g. gpt+claude-fallback" /></dd>
           <dt>Deskripsi</dt><dd><input v-model="form.description" class="input" placeholder="e.g. GPT-4o → Claude Sonnet fallback" /></dd>
@@ -165,8 +167,8 @@ onMounted(load)
           </dd>
         </div>
         <div style="display:flex;gap:.5rem">
-          <button class="btn" @click="create">Simpan</button>
-          <button class="btn ghost" @click="showAdd=false">Batal</button>
+          <button class="btn" @click="create">{{ t('providers.save') }}</button>
+          <button class="btn ghost" @click="showAdd=false">{{ t('providers.cancel') }}</button>
         </div>
       </div>
     </div>
@@ -219,7 +221,7 @@ onMounted(load)
     </template>
 
     <div v-if="filtered().length===0 && !showAdd" class="note" style="text-align:center;padding:2rem">
-      Belum ada combo. Klik "+ Combo" untuk membuat.
+      t('combos.none')
     </div>
   </div>
 </template>
