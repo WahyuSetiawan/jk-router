@@ -1,4 +1,4 @@
-// Package media provides a separate registry for media providers (TTS, STT, image).
+// Package media provides a separate registry for media providers (TTS, STT, image, video).
 // Media providers use different API contracts than chat — each operation has its
 // own endpoint, auth, and request shape. This package implements the registry
 // and dispatch logic; routes are wired in api/router.go.
@@ -7,6 +7,7 @@
 //   POST /v1/audio/speech          — TTS  (JSON body → audio file)
 //   POST /v1/audio/transcriptions — STT  (multipart form → JSON transcript)
 //   POST /v1/images/generations   — Image (JSON body → image URL/data)
+//   POST /v1/videos/*             — Video (JSON body → async job / image)
 package media
 
 import (
@@ -17,9 +18,10 @@ import (
 type Capability int
 
 const (
-	CapTTS  Capability = 1 << iota // text-to-speech (/v1/audio/speech)
-	CapSTT                         // speech-to-text (/v1/audio/transcriptions)
-	CapImage                       // image generation (/v1/images/generations)
+	CapTTS   Capability = 1 << iota // text-to-speech (/v1/audio/speech)
+	CapSTT                          // speech-to-text (/v1/audio/transcriptions)
+	CapImage                        // image generation (/v1/images/generations)
+	CapVideo                        // video generation (/v1/videos/*)
 )
 
 // Registry holds configuration for one upstream media provider.
@@ -46,6 +48,12 @@ type Registry struct {
 	ImagePath       string
 	ImageAuthHeader string
 	ImageAuthPrefix string
+
+	// Video config — ponytail: reserved for future async-video providers (Runway, Luma, etc.)
+	VideoBaseURL    string
+	VideoPath       string
+	VideoAuthHeader string
+	VideoAuthPrefix string
 }
 
 var (

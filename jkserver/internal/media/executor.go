@@ -18,7 +18,7 @@ type Executor struct {
 	path     string
 	authHdr  string
 	authPfx  string
-	oper     string // "tts", "stt", "image"
+	oper     string // "tts", "stt", "image", "video"
 }
 
 // NewTTSExecutor creates an executor for text-to-speech.
@@ -57,9 +57,21 @@ func NewImageExecutor(r *Registry, apiKey string) *Executor {
 	}
 }
 
-// ExecuteTextToSpeech sends a TTS request and writes the audio response to w.
-// Returns the HTTP status code and any error (nil on success).
-func (e *Executor) ExecuteTextToSpeech(body []byte, w http.ResponseWriter) (int, error) {
+// NewVideoExecutor creates an executor for video generation.
+func NewVideoExecutor(r *Registry, apiKey string) *Executor {
+	return &Executor{
+		client:    &http.Client{Timeout: 120 * time.Second},
+		baseURL:   r.VideoBaseURL,
+		path:      r.VideoPath,
+		authHdr:   r.VideoAuthHeader,
+		authPfx:   r.VideoAuthPrefix,
+		oper:      "video",
+	}
+}
+
+// ExecuteTextToSpeech sends a TTS request. Returns status code and error.
+// Caller writes bw.Bytes() to the real response writer on success.
+func (e *Executor) ExecuteTextToSpeech(body []byte, bw *bufWriter) (int, error) {
 	req, err := http.NewRequest("POST", e.baseURL+e.path, bytes.NewReader(body))
 	if err != nil {
 		return 502, err
@@ -67,23 +79,19 @@ func (e *Executor) ExecuteTextToSpeech(body []byte, w http.ResponseWriter) (int,
 	setAuth(req, e.authHdr, e.authPfx, "")
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "audio/*")
-
-	return e.do(req, w)
+	return e.do(req, bw)
 }
 
-// ExecuteSpeechToText reads a multipart audio file from req and writes the JSON
-// transcript response to w.
-func (e *Executor) ExecuteSpeechToText(req *http.Request, w http.ResponseWriter) (int, error) {
-	// Read multipart body into a buffer so we can forward it.
+// ExecuteSpeechToText reads a multipart audio file from req and sends it upstream.
+// Returns status code and error. Caller writes bw.Bytes() to the real response on success.
+func (e *Executor) ExecuteSpeechToText(req *http.Request, bw *bufWriter) (int, error) {
 	var buf bytes.Buffer
 	wr := multipart.NewWriter(&buf)
-	// Copy form fields from the original request.
 	for k, vv := range req.MultipartForm.Value {
 		for _, v := range vv {
 			wr.WriteField(k, v)
 		}
 	}
-	// Copy file parts.
 	for k, fh := range req.MultipartForm.File {
 		for _, f := range fh {
 			fw, _ := wr.CreateFormFile(k, f.Filename)
@@ -99,27 +107,35 @@ func (e *Executor) ExecuteSpeechToText(req *http.Request, w http.ResponseWriter)
 	}
 	setAuth(httpReq, e.authHdr, e.authPfx, "")
 	httpReq.Header.Set("Content-Type", wr.FormDataContentType())
-
-	return e.do(httpReq, w)
+	return e.do(httpReq, bw)
 }
 
-// ExecuteImageGeneration sends an image generation request and writes the JSON
-// response (url/data) to w.
-func (e *Executor) ExecuteImageGeneration(body []byte, w http.ResponseWriter) (int, error) {
+// ExecuteImageGeneration sends an image generation request. Returns status and error.
+func (e *Executor) ExecuteImageGeneration(body []byte, bw *bufWriter) (int, error) {
 	req, err := http.NewRequest("POST", e.baseURL+e.path, bytes.NewReader(body))
 	if err != nil {
 		return 502, err
 	}
 	setAuth(req, e.authHdr, e.authPfx, "")
 	req.Header.Set("Content-Type", "application/json")
-
-	return e.do(req, w)
+	return e.do(req, bw)
 }
 
-func (e *Executor) do(req *http.Request, w http.ResponseWriter) (int, error) {
+// ExecuteVideoGeneration sends a video generation request. Returns status and error.
+func (e *Executor) ExecuteVideoGeneration(body []byte, bw *bufWriter) (int, error) {
+	req, err := http.NewRequest("POST", e.baseURL+e.path, bytes.NewReader(body))
+	if err != nil {
+		return 502, err
+	}
+	setAuth(req, e.authHdr, e.authPfx, "")
+	req.Header.Set("Content-Type", "application/json")
+	return e.do(req, bw)
+}
+
+func (e *Executor) do(req *http.Request, bw *bufWriter) (int, error) {
 	resp, err := e.client.Do(req)
 	if err != nil {
-		writeError(w, fmt.Sprintf("%s upstream error: %v", e.oper, err), 502)
+		writeError(bw, fmt.Sprintf("%s upstream error: %v", e.oper, err), 502)
 		return 502, err
 	}
 	defer resp.Body.Close()
@@ -127,26 +143,24 @@ func (e *Executor) do(req *http.Request, w http.ResponseWriter) (int, error) {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 
 	if resp.StatusCode >= 400 {
-		// Pass through upstream error as JSON.
 		ct := resp.Header.Get("Content-Type")
 		if strings.HasPrefix(ct, "application/json") {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(resp.StatusCode)
-			w.Write(body)
+			bw.Header().Set("Content-Type", "application/json")
+			bw.WriteHeader(resp.StatusCode)
+			bw.Write(body)
 			return resp.StatusCode, nil
 		}
-		writeError(w, fmt.Sprintf("%s upstream error (status %d)", e.oper, resp.StatusCode), resp.StatusCode)
+		writeError(bw, fmt.Sprintf("%s upstream error (status %d)", e.oper, resp.StatusCode), resp.StatusCode)
 		return resp.StatusCode, fmt.Errorf("upstream %d", resp.StatusCode)
 	}
 
-	// Success: stream response back.
 	for k, vv := range resp.Header {
 		for _, v := range vv {
-			w.Header().Set(k, v)
+			bw.Header().Set(k, v)
 		}
 	}
-	w.WriteHeader(resp.StatusCode)
-	w.Write(body)
+	bw.WriteHeader(resp.StatusCode)
+	bw.Write(body)
 	return resp.StatusCode, nil
 }
 
@@ -164,10 +178,10 @@ func setAuth(req *http.Request, header, prefix, token string) {
 	}
 }
 
-func writeError(w http.ResponseWriter, msg string, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+func writeError(bw *bufWriter, msg string, status int) {
+	bw.Header().Set("Content-Type", "application/json")
+	bw.WriteHeader(status)
+	json.NewEncoder(bw).Encode(map[string]interface{}{
 		"error": map[string]string{
 			"type":    "upstream_error",
 			"message": msg,

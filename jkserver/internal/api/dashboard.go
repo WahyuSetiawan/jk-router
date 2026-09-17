@@ -88,6 +88,12 @@ func DashboardRouter(d *db.DB, refreshFn func()) chi.Router {
 	r.Get("/backups", GetBackupsHandler(d))
 	r.Post("/backups/restore", RestoreBackupHandler(d))
 
+	// Media connections (TTS/STT/Image/Video accounts)
+	r.Get("/media-connections", ListMediaConnectionsHandler(d))
+	r.Post("/media-connections", CreateMediaConnectionHandler(d))
+	r.Delete("/media-connections/{id}", DeleteMediaConnectionHandler(d))
+	r.Patch("/media-connections/{id}/toggle", ToggleMediaConnectionHandler(d))
+
 	return r
 }
 
@@ -1171,5 +1177,123 @@ func UpdateQuotaHandler(d *db.DB) http.HandlerFunc {
 		})
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"ok":true,"quota_limit":%d,"quota_window_seconds":%d,"quota_reset_at":%d}`, req.QuotaLimit, req.QuotaWindowSec, resetAt)
+	}
+}
+
+// ─────────────────── Media connections ────────────────────────────────────────
+
+// ListMediaConnectionsHandler returns all media accounts.
+func ListMediaConnectionsHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		rows, err := d.Query(`
+			SELECT id, provider_id, label, auth_type, active, priority, created_at
+			FROM media_accounts ORDER BY created_at DESC
+		`)
+		if err != nil {
+			http.Error(w, `{"error":"query media_accounts"}`, 500)
+			return
+		}
+		defer rows.Close()
+		type MC struct {
+			ID         int64  `json:"id"`
+			ProviderID string `json:"provider_id"`
+			Label      string `json:"label"`
+			AuthType   string `json:"auth_type"`
+			Active     bool   `json:"active"`
+			Priority   int    `json:"priority"`
+			CreatedAt  int64  `json:"created_at"`
+		}
+		var out []MC
+		for rows.Next() {
+			var c MC
+			rows.Scan(&c.ID, &c.ProviderID, &c.Label, &c.AuthType, &c.Active, &c.Priority, &c.CreatedAt)
+			out = append(out, c)
+		}
+		if out == nil {
+			out = []MC{}
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"media_connections": out})
+	}
+}
+
+// CreateMediaConnectionHandler creates a new media account.
+func CreateMediaConnectionHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ProviderID string `json:"provider_id"`
+			Label      string `json:"label"`
+			Secret     string `json:"secret"`
+			AuthType   string `json:"auth_type"`
+			Priority   int    `json:"priority"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+			return
+		}
+		if req.ProviderID == "" || req.Label == "" {
+			http.Error(w, `{"error":"provider_id and label required"}`, http.StatusBadRequest)
+			return
+		}
+		authType := req.AuthType
+		if authType == "" {
+			authType = "api_key"
+		}
+		priority := req.Priority
+		if priority == 0 {
+			priority = 0
+		}
+		var encrypted sql.NullString
+		var err error
+		if req.Secret != "" {
+			enc, e := db.EncryptSecret(req.Secret)
+			if e != nil {
+				http.Error(w, `{"error":"encrypt"}`, 500)
+				return
+			}
+			encrypted = sql.NullString{String: enc, Valid: true}
+			_ = err
+		}
+		var id int64
+		d.EnqueueWriteSync(func(q *db.Queue) {
+			res, e := q.DB().Exec(
+				`INSERT INTO media_accounts (provider_id, label, auth_type, encrypted_key, priority, active) VALUES (?, ?, ?, ?, ?, 1)`,
+				req.ProviderID, req.Label, authType, encrypted, priority,
+			)
+			if e != nil {
+				http.Error(w, fmt.Sprintf(`{"error":"insert: %v"}`, e), 500)
+				return
+			}
+			id, _ = res.LastInsertId()
+		})
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"id":%d}`, id)
+	}
+}
+
+// DeleteMediaConnectionHandler deletes a media account.
+func DeleteMediaConnectionHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		d.EnqueueWriteSync(func(q *db.Queue) {
+			q.DB().Exec(`DELETE FROM media_accounts WHERE id=?`, id)
+		})
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"ok":true}`)
+	}
+}
+
+// ToggleMediaConnectionHandler toggles a media account's active status.
+func ToggleMediaConnectionHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		var active bool
+		d.EnqueueWriteSync(func(q *db.Queue) {
+			var isActive int
+			q.DB().QueryRow(`SELECT active FROM media_accounts WHERE id=?`, id).Scan(&isActive)
+			active = isActive == 0
+			q.DB().Exec(`UPDATE media_accounts SET active=? WHERE id=?`, active, id)
+		})
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"id":%s,"active":%t}`, id, active)
 	}
 }

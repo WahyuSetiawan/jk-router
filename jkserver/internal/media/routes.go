@@ -43,7 +43,7 @@ func (b *bufWriter) Header() http.Header      { return b.header }
 func (b *bufWriter) WriteHeader(code int)     { b.code = code }
 
 // Router wires media endpoints onto a chi.Mux.
-// Endpoints: /v1/audio/speech, /v1/audio/transcriptions, /v1/images/generations
+// Endpoints: /v1/audio/speech, /v1/audio/transcriptions, /v1/images/generations, /v1/videos/*
 func Router(d Store) chi.Router {
 	r := chi.NewRouter()
 
@@ -85,6 +85,8 @@ func Router(d Store) chi.Router {
 				capCap = CapSTT
 			case OpImage:
 				capCap = CapImage
+			case OpVideo:
+				capCap = CapVideo
 			}
 			if reg.Capabilities&capCap == 0 {
 				continue
@@ -97,6 +99,8 @@ func Router(d Store) chi.Router {
 				exe = NewSTTExecutor(reg, a.APIKey)
 			case OpImage:
 				exe = NewImageExecutor(reg, a.APIKey)
+			case OpVideo:
+				exe = NewVideoExecutor(reg, a.APIKey)
 			}
 			if exe != nil {
 				out = append(out, exe)
@@ -114,9 +118,10 @@ func Router(d Store) chi.Router {
 					capCap = CapSTT
 				case OpImage:
 					capCap = CapImage
+				case OpVideo:
+					capCap = CapVideo
 				}
 				if reg.Capabilities&capCap != 0 {
-					// Prepend if account found, otherwise use as fallback.
 					found := false
 					for _, a := range cache {
 						if a.ProviderID == model && a.Active {
@@ -133,6 +138,8 @@ func Router(d Store) chi.Router {
 							exe = NewSTTExecutor(reg, "")
 						case OpImage:
 							exe = NewImageExecutor(reg, "")
+						case OpVideo:
+							exe = NewVideoExecutor(reg, "")
 						}
 						if exe != nil {
 							out = append([]*Executor{exe}, out...)
@@ -222,8 +229,16 @@ func Router(d Store) chi.Router {
 
 		var lastErr error
 		for i, exe := range executors {
-			code, err := exe.ExecuteSpeechToText(req, w)
+			bw := newBufWriter()
+			code, err := exe.ExecuteSpeechToText(req, bw)
 			if err == nil && code >= 200 && code < 300 {
+				for k, vv := range bw.header {
+					for _, v := range vv {
+						w.Header().Set(k, v)
+					}
+				}
+				w.WriteHeader(bw.code)
+				w.Write(bw.Bytes())
 				return
 			}
 			lastErr = err
@@ -278,6 +293,55 @@ func Router(d Store) chi.Router {
 		http.Error(w, fmt.Sprintf(`{"error":{"type":"upstream_error","message":"all image providers failed: %v"}}`, lastErr), http.StatusBadGateway)
 	})
 
+	// ── POST /v1/videos/generations ─────────────────────────────────────────────
+	// ponytail: video providers use async APIs (poll job status). This is a thin
+	// passthrough that returns whatever the provider returns — upgrade once a
+	// concrete provider contract is chosen.
+	r.Post("/videos/generations", func(w http.ResponseWriter, req *http.Request) {
+		bearer := extractBearer(req)
+		if bearer == "" {
+			http.Error(w, `{"error":{"type":"invalid_request_error","message":"missing authorization"}}`, http.StatusUnauthorized)
+			return
+		}
+		refreshCache()
+
+		body, err := io.ReadAll(io.LimitReader(req.Body, 4*1024*1024))
+		if err != nil {
+			http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
+			return
+		}
+
+		var reqBody struct {
+			Model string `json:"model"`
+		}
+		json.Unmarshal(body, &reqBody)
+
+		executors := buildExecutorsForOp(reqBody.Model, OpVideo)
+		if len(executors) == 0 {
+			http.Error(w, `{"error":{"type":"invalid_request_error","message":"no active video accounts"}}`, http.StatusServiceUnavailable)
+			return
+		}
+
+		var lastErr error
+		for i, exe := range executors {
+			bw := newBufWriter()
+			code, err := exe.ExecuteVideoGeneration(body, bw)
+			if err == nil && code >= 200 && code < 300 {
+				for k, vv := range bw.header {
+					for _, v := range vv {
+						w.Header().Set(k, v)
+					}
+				}
+				w.WriteHeader(bw.code)
+				w.Write(bw.Bytes())
+				return
+			}
+			lastErr = err
+			log.Printf("[media/video] attempt=%d failed: %v", i, err)
+		}
+		http.Error(w, fmt.Sprintf(`{"error":{"type":"upstream_error","message":"all video providers failed: %v"}}`, lastErr), http.StatusBadGateway)
+	})
+
 	return r
 }
 
@@ -285,9 +349,10 @@ func Router(d Store) chi.Router {
 type OpType int
 
 const (
-	OpTTS  OpType = 1
-	OpSTT  OpType = 2
+	OpTTS   OpType = 1
+	OpSTT   OpType = 2
 	OpImage OpType = 3
+	OpVideo OpType = 4
 )
 
 func extractBearer(req *http.Request) string {
