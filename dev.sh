@@ -41,4 +41,4 @@ done
 # ── Start frontend ────────────────────────────────────────────────────────
 echo "🎨 Starting Nuxt dev server..."
 cd web
-pnpm dev
+bun dev
