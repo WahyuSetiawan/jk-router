@@ -20,6 +20,7 @@ import (
 
 	"jkrouter/jkserver/internal/db"
 	"jkrouter/jkserver/internal/engine"
+	"jkrouter/jkserver/internal/media"
 	"jkrouter/jkserver/internal/oauth"
 	"jkrouter/jkserver/internal/providers/registry"
 	"jkrouter/jkserver/internal/proxypool"
@@ -250,7 +251,55 @@ func Router(d *db.DB, transReg *translator.Registry, ul *UsageLogger) chi.Router
 		fmt.Fprintf(w, `{"ok":true,"provider":"%s"}`, provider)
 	})
 
+	// ── Media routes (TTS / STT / Image) ─────────────────────────────────────
+	dbMedia := &mediaDBLoader{db: d}
+	r.Mount("/v1", media.Router(dbMedia))
+
 	return r
+}
+
+// ─────────────────── media account loader ───────────────────────────────────
+
+type mediaDBLoader struct {
+	db *db.DB
+}
+
+func (m *mediaDBLoader) LoadAccounts(fn func(*media.Account)) {
+	type row struct {
+		id         int64
+		providerID string
+		encKey     []byte
+		active     int
+	}
+	var rows []row
+	m.db.EnqueueWriteSync(func(q *db.Queue) {
+		rs, err := q.DB().Query(`SELECT id, provider_id, encrypted_key, active FROM media_accounts`)
+		if err != nil || rs == nil {
+			return
+		}
+		defer rs.Close()
+		for rs.Next() {
+			var r row
+			if err := rs.Scan(&r.id, &r.providerID, &r.encKey, &r.active); err != nil {
+				continue
+			}
+			rows = append(rows, r)
+		}
+	})
+	for _, r := range rows {
+		keyPlain := ""
+		if r.encKey != nil {
+			if dec, err := db.DecryptSecret(string(r.encKey)); err == nil {
+				keyPlain = dec
+			}
+		}
+		fn(&media.Account{
+			ID:         r.id,
+			ProviderID: r.providerID,
+			APIKey:     keyPlain,
+			Active:     r.active != 0,
+		})
+	}
 }
 
 // ─────────────────── DB loaders ─────────────────────────────────────────────
