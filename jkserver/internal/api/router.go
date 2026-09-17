@@ -60,6 +60,20 @@ func Router(d *db.DB, transReg *translator.Registry, ul *UsageLogger) chi.Router
 		}
 	}
 
+	// Load RTK filter settings from DB (rtk_filters: JSON array of filter names).
+	var rtkFiltersJSON string
+	d.QueryRow("SELECT value FROM settings_kv WHERE key='rtk_filters'").Scan(&rtkFiltersJSON)
+	var rtkFilter *rtk.Registry
+	if rtkFiltersJSON != "" {
+		rtkFilter = rtk.NewRegistry()
+		var filters []string
+		if json.Unmarshal([]byte(rtkFiltersJSON), &filters) == nil {
+			for _, name := range filters {
+				rtkFilter.Enable(name)
+			}
+		}
+	}
+
 	cfg := &engine.RoutingConfig{
 		AccountStore:      accountStore,
 		ComboStore:        comboStore,
@@ -141,6 +155,7 @@ func Router(d *db.DB, transReg *translator.Registry, ul *UsageLogger) chi.Router
 			return true
 		},
 		QuotaStore: rtk.New(24*time.Hour, 0), // 24h sliding window; 0 = no hard limit (soft warning only)
+		RTKFilter:  rtkFilter,
 	}
 
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {

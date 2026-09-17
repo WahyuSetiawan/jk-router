@@ -80,6 +80,9 @@ type RoutingConfig struct {
 	tokenRefreshAhead time.Duration
 	// QuotaStore tracks token usage per account (sliding window). nil = quota disabled.
 	QuotaStore *rtk.Saver
+	// RTKFilter applies token-saving filters (caveman/ponytail/headroom/system-inject).
+	// nil = no RTK filtering.
+	RTKFilter *rtk.Registry
 }
 
 // DefaultRoutingConfig returns a config with sensible defaults.
@@ -120,6 +123,14 @@ func ExecuteRouting(body []byte, bearer string, stream bool, w http.ResponseWrit
 			if adapted, newModel, err := cfg.CapacityAdapter.WrapRequest(reqBody, reqCapList); err == nil && newModel != "" {
 				reqBody = adapted
 				model = newModel
+			}
+		}
+
+		// Apply RTK filters if enabled (post-translate, pre-exec).
+		if cfg.RTKFilter != nil {
+			if filtered, applied := cfg.RTKFilter.Apply(reqBody); len(applied) > 0 {
+				log.Printf("[rtk] req=%s applied filters: %v", reqID, applied)
+				reqBody = filtered
 			}
 		}
 

@@ -196,3 +196,44 @@ Urutan dikerjakan (tergantung API yang sudah ada):
 - [ ] Tidak ada worker pool untuk SQLite write (1 goroutine, §4.1)
 - [ ] Tidak copy-paste perilaku 9Router yang belum diverifikasi di source-nya — grep dulu, baru port (risiko PRD §8)
 - [ ] Failover mid-stream = TIDAK BOLA (§4.1 point-of-no-return)
+
+---
+
+## Sprint 6 — Polish & Optimize (~1 minggu, scope bisa di-pause)
+
+> Task tambahan di luar sprint utama. Berurutan: 6.1→6.2→6.3→6.4, sisanya on-demand.
+
+### 6.1 `[BE]` Reduce binary size <15MB
+- Audit `jkserver/cmd/` embed: saat ini `_nuxt/*.js` ~511KB + Go stdlib = ~18MB.
+- Opsi: (A) tree-shake Nuxt chunks via `nuxt generate --no-ssr` + minimal pages, (B) gzip compress embedded assets di handler, (C) drop unused JS chunks.
+- **Done**: `go build` → binary <15MB; `./jkrouter serve` dashboard tetap aksesibel.
+
+### 6.2 `[BE]` Wire RTK filters ke engine routing
+- Package `internal/rtk/` saat ini hanya tracking (Saver), belum ada filter aplikasi.
+- Tambah interface `RTKFilter{Apply(body []byte) ([]byte, error)}` + implementasi caveman (remove verbose prefixes), ponytail (strip comments/whitespace), headroom (truncate long messages).
+- Inject filter ke `engine.ExecuteRouting()` sebelum executor dipanggil (post-translate, pre-exec).
+- **Done**: toggle ON di Settings → delta token count di `usage_log` berkurang vs baseline OFF.
+
+### 6.3 `[FE]` Halaman token-saver.vue
+- Dashboard dedicated page untuk RTK config: toggle per filter, config per-provider token limits, stats tab (savings comparison).
+- Wire ke API settings (GET/PUT `/api/dashboard/settings`).
+- **Done**: halaman tampil di sidebar, semua toggle berfungsi, stats ter-update.
+
+### 6.4 `[FE+BE]` Aktifkan RTK toggle di Settings
+- Settings page saat ini punya section "RTK token saver" tapi semua checkbox disabled/stub.
+- Hubungkan ke backend: simpan `rtk_enabled`, `rtk_caveman`, `rtk_ponytail`, `rtk_headroom` ke `settings_kv`.
+- Backend baca settings saat build `RoutingConfig` dan injek filter chain.
+- **Done**: toggle di Settings berpengaruh ke routing behavior.
+
+---
+
+## Di luar sprint (on-demand, bukan jadwal)
+
+| # | Task | Estimasi | Catatan |
+|---|------|----------|---------|
+| 7.1 | Cloud sync (`~/.jkrouter/config.json` → remote) | ~4h | Perlu pelajari protokol 9Router dulu |
+| 7.2 | MITM capture mode (`crypto/tls` self-signed CA) | ~4h | Debugging provider protocol |
+| 7.3 | Tray systray (Windows/macOS/Linux X11) | ~3h | CGO required, Linux Wayland = graceful fallback |
+| 7.4 | Provider batch berikutnya (tunggu permintaan user) | ~4h | Template dari Sprint 2.2, 10 provider tambahan |
+| 7.5 | Proxy relay worker deploy (vercel/cloudflare/deno) | ~3h | Worker template terpisah |
+| 7.6 | pxpipe/skills evaluation (PRD §10.4 undecided) | TBD | Evaluasi dulu nilai pakai untuk user JKRouter |
