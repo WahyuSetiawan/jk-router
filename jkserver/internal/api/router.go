@@ -251,9 +251,10 @@ func Router(d *db.DB, transReg *translator.Registry, ul *UsageLogger) chi.Router
 		fmt.Fprintf(w, `{"ok":true,"provider":"%s"}`, provider)
 	})
 
-	// ── Media routes (TTS / STT / Image) ─────────────────────────────────────
+	// ── Media routes (TTS / STT / Image / Video) ──────────────────────────
+	// Mounted directly (no /v1 prefix) because api.Router is already nested under /v1
 	dbMedia := &mediaDBLoader{db: d}
-	r.Mount("/v1", media.Router(dbMedia))
+	r.Mount("/", media.Router(dbMedia))
 
 	return r
 }
