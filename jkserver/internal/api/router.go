@@ -44,6 +44,7 @@ func Router(d *db.DB, transReg *translator.Registry, ul *UsageLogger) chi.Router
 
 	// Build ProviderMeta slice from the registry package.
 	providers := buildProviderMetas()
+	applyProviderOverrides(d, providers)
 
 	// Load capacity adapter settings from DB.
 	var capAdapterJSON string
@@ -496,6 +497,30 @@ func buildProviderMetas() []*engine.ProviderMeta {
 		})
 	}
 	return out
+}
+
+// applyProviderOverrides copies the dashboard base_url override (if any) from
+// the providers table onto each ProviderMeta. A non-empty base_url wins over the
+// registry default; this lets operators point a provider at a proxy/self-hosted
+// endpoint without recompiling the Go registries.
+func applyProviderOverrides(d *db.DB, metas []*engine.ProviderMeta) {
+	rows, err := d.Query(`SELECT id, base_url FROM providers WHERE base_url IS NOT NULL AND base_url != ''`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	overrides := make(map[string]string)
+	for rows.Next() {
+		var id, baseURL string
+		if err := rows.Scan(&id, &baseURL); err == nil && baseURL != "" {
+			overrides[id] = baseURL
+		}
+	}
+	for _, m := range metas {
+		if ov, ok := overrides[m.ID]; ok {
+			m.BaseURL = ov
+		}
+	}
 }
 
 func modelIDs(reg *registry.Registry) []string {

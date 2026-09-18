@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strings"
 	"bytes"
 	"encoding/json"
 	"net/http"
@@ -120,7 +121,7 @@ func TestUpdateProvider(t *testing.T) {
 	createRec := httptest.NewRecorder()
 	srv.Config.Handler.ServeHTTP(createRec, createReq)
 
-	updateBody, _ := json.Marshal(map[string]string{"label": "Updated"})
+	updateBody, _ := json.Marshal(map[string]string{"name": "upd-prov-renamed"})
 	updateReq := httptest.NewRequest("PUT", srv.URL+"/api/dashboard/providers/upd-prov", bytes.NewReader(updateBody))
 	updateReq.Header.Set("Content-Type", "application/json")
 	updateReq.AddCookie(cookie)
@@ -128,6 +129,51 @@ func TestUpdateProvider(t *testing.T) {
 	srv.Config.Handler.ServeHTTP(updateRec, updateReq)
 	if updateRec.Code != http.StatusOK {
 		t.Fatalf("update provider: %d", updateRec.Code)
+	}
+}
+
+func TestUpdateProviderBaseURL(t *testing.T) {
+	d := newTestDB(t, hashPassword(t, "testpwd"))
+	_, srv := newRouter(t, d)
+	cookie := loginAndGetCookie(t, srv, "testpwd")
+
+	// Create
+	createBody, _ := json.Marshal(map[string]string{"name": "openai"})
+	createReq := httptest.NewRequest("POST", srv.URL+"/api/dashboard/providers", bytes.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.AddCookie(cookie)
+	createRec := httptest.NewRecorder()
+	srv.Config.Handler.ServeHTTP(createRec, createReq)
+
+	// Set a valid override
+	setBody, _ := json.Marshal(map[string]string{"base_url": "https://my-proxy.local/openai"})
+	setReq := httptest.NewRequest("PUT", srv.URL+"/api/dashboard/providers/openai", bytes.NewReader(setBody))
+	setReq.Header.Set("Content-Type", "application/json")
+	setReq.AddCookie(cookie)
+	setRec := httptest.NewRecorder()
+	srv.Config.Handler.ServeHTTP(setRec, setReq)
+	if setRec.Code != http.StatusOK {
+		t.Fatalf("set base_url: %d body=%s", setRec.Code, setRec.Body.String())
+	}
+
+	// Invalid base_url rejected
+	badBody, _ := json.Marshal(map[string]string{"base_url": "not-a-url"})
+	badReq := httptest.NewRequest("PUT", srv.URL+"/api/dashboard/providers/openai", bytes.NewReader(badBody))
+	badReq.Header.Set("Content-Type", "application/json")
+	badReq.AddCookie(cookie)
+	badRec := httptest.NewRecorder()
+	srv.Config.Handler.ServeHTTP(badRec, badReq)
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid base_url expected 400, got %d", badRec.Code)
+	}
+
+	// GET reflects the override
+	getReq := httptest.NewRequest("GET", srv.URL+"/api/dashboard/providers/openai", nil)
+	getReq.AddCookie(cookie)
+	getRec := httptest.NewRecorder()
+	srv.Config.Handler.ServeHTTP(getRec, getReq)
+	if !strings.Contains(getRec.Body.String(), "my-proxy.local") {
+		t.Fatalf("expected base_url override in GET, got %s", getRec.Body.String())
 	}
 }
 
@@ -254,5 +300,44 @@ func TestConnectionsCRUD(t *testing.T) {
 	}
 	if len(conns) != 1 {
 		t.Fatalf("expected 1 connection, got %d", len(conns))
+	}
+}
+
+func TestGetProviderModels(t *testing.T) {
+	d := newTestDB(t, hashPassword(t, "testpwd"))
+	_, srv := newRouter(t, d)
+
+	cookie := loginAndGetCookie(t, srv, "testpwd")
+
+	req := httptest.NewRequest("GET", srv.URL+"/api/dashboard/providers/openai/models", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Config.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get models: %d, body: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]interface{}
+	json.NewDecoder(rec.Body).Decode(&resp)
+	models, ok := resp["models"].([]interface{})
+	if !ok {
+		t.Fatalf("expected models array")
+	}
+	if len(models) == 0 {
+		t.Fatalf("expected non-empty models list")
+	}
+}
+
+func TestGetProviderModelsNotFound(t *testing.T) {
+	d := newTestDB(t, hashPassword(t, "testpwd"))
+	_, srv := newRouter(t, d)
+
+	cookie := loginAndGetCookie(t, srv, "testpwd")
+
+	req := httptest.NewRequest("GET", srv.URL+"/api/dashboard/providers/nonexistent/models", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Config.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
 	}
 }

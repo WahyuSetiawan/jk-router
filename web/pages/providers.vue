@@ -5,8 +5,11 @@ import { ref, computed, onMounted } from 'vue'
 
 const providers = ref<any[]>([])
 const proxyPools = ref<{id: number; name: string}[]>([])
+const providerModels = ref<Record<string, any[]>>({})
 const showAddAccount = ref(false)
 const showAddProvider = ref(false)
+const showEditProvider = ref(false)
+const editingProvider = ref<{id: string; name: string; base_url: string} | null>(null)
 const search = ref('')
 
 // Per-provider expand state
@@ -30,6 +33,15 @@ async function load() {
   ])
   providers.value = pr.providers || []
   proxyPools.value = pp.proxy_pools || []
+}
+
+async function loadModels(pid: string) {
+  if (providerModels.value[pid]) return
+  try {
+    const r = await fetch(`/api/dashboard/providers/${pid}/models`)
+    const j = await r.json()
+    providerModels.value[pid] = j.models || []
+  } catch { /* skip */ }
 }
 
 function openAddAccount(pid: string) {
@@ -61,8 +73,39 @@ async function createProvider() {
   await load()
 }
 
+function openEditProvider(p: any) {
+  editingProvider.value = { id: p.id, name: p.name, base_url: p.base_url || '' }
+  showEditProvider.value = true
+}
+
+async function saveEditProvider() {
+  if (!editingProvider.value) return
+  const { id, name, base_url } = editingProvider.value
+  if (!name) return
+  const body: any = { name }
+  if (base_url) body.base_url = base_url
+  const r = await fetch(`/api/dashboard/providers/${id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+  if (!r.ok) {
+    alert(`Gagal: ${await r.text()}`)
+    return
+  }
+  editingProvider.value = null
+  showEditProvider.value = false
+  await load()
+}
+
+async function deleteProvider(p: any) {
+  if (!confirm(`Hapus provider "${p.name}" beserta semua akunnya?`)) return
+  await fetch(`/api/dashboard/providers/${p.id}`, { method: 'DELETE' })
+  await load()
+}
+
 function toggleProvider(pid: string) {
   expanded.value[pid] = !expanded.value[pid]
+  if (expanded.value[pid]) loadModels(pid)
 }
 
 function startEdit(a: any) {
@@ -197,6 +240,26 @@ onMounted(load)
       </div>
     </div>
 
+    <!-- Edit Provider Modal -->
+    <div v-if="showEditProvider && editingProvider" class="modal-overlay" @click.self="showEditProvider=false">
+      <div class="modal">
+        <h3>Edit Provider</h3>
+        <div class="kv" style="margin-bottom:.8rem">
+          <dt>Provider ID</dt><dd><input class="input" :value="editingProvider.id" disabled /></dd>
+          <dt>Display Name</dt><dd><input v-model="editingProvider.name" class="input" placeholder="e.g. OpenAI" /></dd>
+          <dt>Base URL (endpoint)</dt>
+          <dd>
+            <input v-model="editingProvider.base_url" class="input" placeholder="https://api.openai.com" />
+            <div class="note" style="font-size:.6rem;margin-top:.2rem">Override engine endpoint untuk provider ini. Kosongkan untuk kembali ke default registry Go.</div>
+          </dd>
+        </div>
+        <div style="display:flex;gap:.5rem">
+          <button class="btn" @click="saveEditProvider">{{ t('providers.save') }}</button>
+          <button class="btn ghost" @click="showEditProvider=false;editingProvider=null">{{ t('providers.cancel') }}</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Add Account Modal -->
     <div v-if="showAddAccount" class="modal-overlay" @click.self="showAddAccount=false">
       <div class="modal">
@@ -231,16 +294,32 @@ onMounted(load)
         <!-- Provider header -->
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
           <div style="display:flex;align-items:center;gap:.5rem">
+            <button class="btn ghost" style="padding:.15rem .3rem;font-size:.7rem" @click.stop="toggleProvider(p.id)">
+              {{ expanded[p.id] ? '▼' : '▶' }}
+            </button>
             <h3 style="color:var(--jkr-lav);margin:0;font-size:1rem">{{ p.name }}</h3>
             <span class="st active" style="font-size:.7rem">{{ p.accounts?.length ?? 0 }} akun</span>
           </div>
-          <button class="btn ghost" style="font-size:.75rem;padding:.2rem .5rem" @click="openAddAccount(p.id)">+ Akun</button>
+          <div style="display:flex;gap:.3rem;align-items:center">
+            <button class="btn ghost" style="font-size:.75rem;padding:.2rem .5rem" @click="openEditProvider(p)">✎</button>
+            <button class="btn ghost" style="font-size:.75rem;padding:.2rem .5rem;color:#b45151" @click="deleteProvider(p)">🗑</button>
+            <button class="btn ghost" style="font-size:.75rem;padding:.2rem .5rem" @click="openAddAccount(p.id)">+ Akun</button>
+          </div>
         </div>
 
         <!-- Capability badges -->
         <div style="display:flex;gap:.3rem;flex-wrap:wrap;margin-bottom:.5rem">
           <span class="chip" style="font-size:.65rem;background:var(--jkr-surface2)">vision</span>
           <span class="chip" style="font-size:.65rem;background:var(--jkr-surface2)">text</span>
+        </div>
+
+        <!-- Models list -->
+        <div v-if="expanded[p.id]" style="margin-bottom:.5rem">
+          <div class="note" style="font-size:.7rem;margin-bottom:.3rem">Models ({{ (providerModels[p.id]||[]).length }})</div>
+          <div style="display:flex;gap:.3rem;flex-wrap:wrap">
+            <span v-for="m in (providerModels[p.id]||[])" :key="m.id" class="chip" style="font-size:.65rem;background:var(--jkr-surface2);cursor:default">{{ m.id }}</span>
+            <span v-if="!(providerModels[p.id]||[]).length" class="note" style="font-size:.65rem">—</span>
+          </div>
         </div>
 
         <!-- Account Table -->
@@ -260,12 +339,8 @@ onMounted(load)
           </thead>
           <tbody>
             <tr v-for="a in p.accounts" :key="a.id">
-              <!-- Expand toggle -->
-              <td>
-                <button class="btn ghost" style="padding:.15rem .3rem;font-size:.7rem" @click="toggleProvider(p.id + '-' + a.id)">
-                  {{ expanded[p.id + '-' + a.id] ? '▼' : '▶' }}
-                </button>
-              </td>
+              <!-- Row expand toggle (unused — kept for future detail rows) -->
+              <td><span class="note" style="font-size:.65rem">·</span></td>
 
               <!-- Name -->
               <td>

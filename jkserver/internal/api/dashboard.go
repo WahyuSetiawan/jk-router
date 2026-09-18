@@ -12,6 +12,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -160,7 +161,7 @@ func ListModelsHandler() http.HandlerFunc {
 func ListProvidersHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		// Fetch all providers
-		provRows, err := d.Query(`SELECT id, name FROM providers ORDER BY name`)
+		provRows, err := d.Query(`SELECT id, name, base_url FROM providers ORDER BY name`)
 		if err != nil {
 			http.Error(w, `{"error":"query providers"}`, 500)
 			return
@@ -168,18 +169,20 @@ func ListProvidersHandler(d *db.DB) http.HandlerFunc {
 		type Provider struct {
 			ID       string         `json:"id"`
 			Name     string         `json:"name"`
+			BaseURL  string         `json:"base_url,omitempty"`
 			Accounts []AccountShort `json:"accounts"`
 		}
 		providers := make(map[string]*Provider)
 		var provList []string
 		for provRows.Next() {
 			var id, name string
-			if err := provRows.Scan(&id, &name); err != nil {
+			var baseURL sql.NullString
+			if err := provRows.Scan(&id, &name, &baseURL); err != nil {
 				provRows.Close()
 				http.Error(w, `{"error":"scan provider"}`, 500)
 				return
 			}
-			p := &Provider{ID: id, Name: name}
+			p := &Provider{ID: id, Name: name, BaseURL: baseURL.String}
 			providers[id] = p
 			provList = append(provList, id)
 		}
@@ -277,13 +280,16 @@ func GetProviderHandler(d *db.DB) http.HandlerFunc {
 		var row struct {
 			ID       string         `json:"id"`
 			Name     string         `json:"name"`
+			BaseURL  string         `json:"base_url,omitempty"`
 			Accounts []AccountShort `json:"accounts"`
 		}
-		err := d.QueryRow(`SELECT id, name FROM providers WHERE id=?`, id).Scan(&row.ID, &row.Name)
+		var baseURL sql.NullString
+		err := d.QueryRow(`SELECT id, name, base_url FROM providers WHERE id=?`, id).Scan(&row.ID, &row.Name, &baseURL)
 		if err != nil {
 			http.Error(w, `{"error":"not found"}`, 404)
 			return
 		}
+		row.BaseURL = baseURL.String
 
 		rows, err := d.Query(`
 			SELECT id, label, auth_type, state, priority, created_at
@@ -317,53 +323,35 @@ func GetProviderModelsHandler(d *db.DB) http.HandlerFunc {
 	}
 }
 
-// UpdateProviderHandler updates provider and/or account info.
+// UpdateProviderHandler updates provider name and/or base_url endpoint override.
+// base_url is a per-provider transport override on top of the Go registry default;
+// an empty value clears it (revert to registry BaseURL).
 func UpdateProviderHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		var req struct {
-			Name     string `json:"name"`
-			Label    string `json:"label"`
-			BaseURL  string `json:"base_url"`
-			AuthType string `json:"auth_type"`
+			Name    string `json:"name"`
+			BaseURL string `json:"base_url"`
 		}
 		json.NewDecoder(r.Body).Decode(&req)
-
 		d.EnqueueWriteSync(func(q *db.Queue) {
 			if req.Name != "" {
 				q.DB().Exec(`UPDATE providers SET name=? WHERE id=?`, req.Name, id)
 			}
-			// Update the first account for this provider (simple single-account model)
-			var acctID int64
-			q.DB().QueryRow(`SELECT id FROM accounts WHERE provider_id=? LIMIT 1`, id).Scan(&acctID)
-			if acctID > 0 {
-				updates := []string{}
-				args := []interface{}{}
-				if req.Label != "" {
-					updates = append(updates, "label=?")
-					args = append(args, req.Label)
+			if req.BaseURL != "" {
+				// Validate it's a plausible URL before storing.
+				if u, err := url.Parse(req.BaseURL); err != nil || u.Scheme == "" || u.Host == "" {
+					http.Error(w, `{"error":"invalid base_url: must be http(s)://host"}`, 400)
+					return
 				}
-				if req.AuthType != "" {
-					updates = append(updates, "auth_type=?")
-					args = append(args, req.AuthType)
-				}
-				if req.BaseURL != "" {
-					enc, err := db.EncryptSecret(req.BaseURL)
-					if err == nil {
-						updates = append(updates, "encrypted_key=?")
-						args = append(args, enc)
-					}
-				}
-				if len(updates) > 0 {
-					q.DB().Exec(
-						"UPDATE accounts SET "+
-							fmt.Sprintf("%s WHERE id=?", joinStrings(updates, ","))+
-							"?", append(args, acctID)...,
-					)
-				}
+				q.DB().Exec(`UPDATE providers SET base_url=? WHERE id=?`, req.BaseURL, id)
+			} else {
+				// base_url omitted → clear override (restore registry default).
+				q.DB().Exec(`UPDATE providers SET base_url='' WHERE id=?`, id)
 			}
 		})
-		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"ok":true,"id":"%s"}`, id)
 	}
 }
 
