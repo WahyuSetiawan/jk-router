@@ -9,6 +9,8 @@ const search = ref('')
 const form = ref({ provider_id: '', label: '', secret: '', auth_type: 'api_key', priority: 0 })
 const msg = ref('')
 const msgType = ref<'ok' | 'err'>('ok')
+const testing = ref(false)
+const testResult = ref<{ok: boolean, message?: string} | null>(null)
 
 const mediaRegistries = ref<any[]>([])
 
@@ -41,6 +43,37 @@ function openAdd(pid?: string) {
   showAdd.value = true
 }
 
+async function testConnection() {
+  if (!form.value.provider_id || !form.value.secret) {
+    setMsg(t('media.test_err'), 'err')
+    return
+  }
+  testing.value = true
+  testResult.value = null
+  try {
+    const r = await fetch('/api/dashboard/media-connections/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider_id: form.value.provider_id,
+        secret: form.value.secret,
+        operation: form.value.provider_id === 'stability' ? 'image' : 'tts',
+      }),
+    })
+    const data = await r.json()
+    testResult.value = data
+    if (data.ok) {
+      setMsg(t('media.test_ok'), 'ok')
+    } else {
+      setMsg(t('media.test_err') + ': ' + (data.error || ''), 'err')
+    }
+  } catch (e) {
+    setMsg('Gagal: ' + (e as Error).message, 'err')
+  } finally {
+    testing.value = false
+  }
+}
+
 async function create() {
   if (!form.value.label || !form.value.provider_id) {
     setMsg(t('common.error'), 'err')
@@ -58,7 +91,7 @@ async function create() {
     }
     showAdd.value = false
     await load()
-    setMsg('Akun berhasil ditambahkan', 'ok')
+    setMsg(t('common.success') + ' — ' + t('media.add'), 'ok')
   } catch (e) {
     setMsg('Gagal: ' + (e as Error).message, 'err')
   }
@@ -70,7 +103,7 @@ async function toggle(a: any) {
 }
 
 async function del(a: any) {
-  if (!confirm(`t('providers.delete') + ' akun "${a.label}"?`)) return
+  if (!confirm(t('providers.delete') + ' akun "' + a.label + '"?')) return
   await fetch(`/api/dashboard/media-connections/${a.id}`, { method: 'DELETE' })
   await load()
 }
@@ -105,7 +138,7 @@ onMounted(() => { load(); loadRegistries() })
       </h2>
       <small style="color:var(--jkr-mut);font-size:.75rem">TTS · STT · Image · Video accounts</small>
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-        <input v-model="search" class="search" style="flex:1;max-width:200px" placeholder="{{ t('providers.search') }}" />
+        <input v-model="search" class="search" style="flex:1;max-width:200px" :placeholder="t('providers.search')" />
         <button class="btn ghost" @click="load()">↻ Refresh</button>
         <button class="btn" @click="openAdd()">+ Akun Media</button>
       </div>
@@ -137,13 +170,17 @@ onMounted(() => { load(); loadRegistries() })
               <option value="api_key">API Key</option>
             </select>
           </dd>
-          <dt v-if="form.auth_type==='api_key'">t('providers.api_key')</dt>
+          <dt v-if="form.auth_type==='api_key'">{{ t('providers.api_key') }}</dt>
           <dd v-if="form.auth_type==='api_key'"><input v-model="form.secret" class="input" type="password" placeholder="sk-..." /></dd>
           <dt>{{ t('providers.priority') }}</dt><dd><input v-model.number="form.priority" class="input" type="number" min="0" max="100" /></dd>
         </div>
         <div style="display:flex;gap:.5rem">
+          <button class="btn" @click="testConnection" :disabled="testing">{{ testing ? t('media.testing') : t('media.test_connection') }}</button>
           <button class="btn" @click="create">{{ t('providers.save') }}</button>
           <button class="btn ghost" @click="showAdd=false">{{ t('providers.cancel') }}</button>
+        </div>
+        <div v-if="testResult" :style="{color: testResult.ok ? 'var(--jkr-grn)' : 'var(--jkr-red)', marginTop: '.5rem', fontSize: '.8rem'}" class="note">
+          {{ testResult.ok ? '✓ ' + t('media.test_ok') : t('media.test_err') + ': ' + testResult.error }}
         </div>
       </div>
     </div>

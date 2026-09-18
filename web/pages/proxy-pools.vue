@@ -138,7 +138,7 @@ onMounted(load)
           </dd>
         </div>
         <div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap">
-          <button class="btn ghost btn-sm" @click="load">t('proxypools.test')</button>
+          <button class="btn ghost btn-sm" @click="load">{{ t('proxypools.test') }}</button>
           <button class="btn ghost btn-sm" style="color:var(--jkr-red)" @click="del(p.id)">Delete</button>
           <button v-if="p.ptype === 'relay'" class="btn ghost btn-sm" style="color:var(--jkr-green)"
             @click="openDeploy('vercel')" title="Redeploy to Vercel">↗ Vercel</button>

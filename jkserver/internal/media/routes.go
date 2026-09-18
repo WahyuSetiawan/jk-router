@@ -39,6 +39,29 @@ func newBufWriter() *bufWriter {
 	return &bufWriter{header: make(http.Header), code: 200}
 }
 
+// TestExecutor tests a single media operation against the upstream provider.
+// Returns the HTTP status code and any error.
+func TestExecutor(providerID, secret, operation string) (int, error) {
+	reg := FindByID(providerID)
+	if reg == nil {
+		return 0, fmt.Errorf("unknown provider: %s", providerID)
+	}
+	switch operation {
+	case "tts":
+		ext := NewTTSExecutor(reg, secret)
+		body := []byte(`{"model":"tts-1","input":"Hi","voice":"alloy"}`)
+		_, err := ext.ExecuteTextToSpeech(body, newBufWriter())
+		return 200, err
+	case "image":
+		ext := NewImageExecutor(reg, secret)
+		body := []byte(`{"prompt":"a test image","n":1}`)
+		_, err := ext.ExecuteImageGeneration(body, newBufWriter())
+		return 200, err
+	default:
+		return 0, fmt.Errorf("unsupported operation: %s", operation)
+	}
+}
+
 func (b *bufWriter) Header() http.Header      { return b.header }
 func (b *bufWriter) WriteHeader(code int)     { b.code = code }
 

@@ -23,6 +23,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"jkrouter/jkserver/internal/db"
+	"jkrouter/jkserver/internal/media"
 	"jkrouter/jkserver/internal/rtk"
 	"jkrouter/jkserver/internal/settings"
 	"jkrouter/jkserver/internal/translator"
@@ -100,6 +101,7 @@ func DashboardRouter(d *db.DB, transReg *translator.Registry, refreshFn func()) 
 	// Media connections (TTS/STT/Image/Video accounts)
 	r.Get("/media-connections", ListMediaConnectionsHandler(d))
 	r.Post("/media-connections", CreateMediaConnectionHandler(d))
+	r.Post("/media-connections/test", TestMediaConnectionHandler(d))
 	r.Delete("/media-connections/{id}", DeleteMediaConnectionHandler(d))
 	r.Patch("/media-connections/{id}/toggle", ToggleMediaConnectionHandler(d))
 
@@ -1235,6 +1237,10 @@ func GetSettingsHandler(d *db.DB) http.HandlerFunc {
 		if v := sv("rtk_filters"); v != "" {
 			settings["rtkFilters"] = v
 		}
+		// Headroom tokens config
+		if v := sv("headroom_tokens"); v != "" {
+			settings["headroomTokens"] = v
+		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"settings": settings})
 	}
 }
@@ -1249,9 +1255,10 @@ func PutSettingsHandler(d *db.DB) http.HandlerFunc {
 			LogBuffer      string      `json:"logBuffer"`
 			WalInterval    string      `json:"walInterval"`
 			Cooldown429    string      `json:"cooldown429"`
-		CircuitBreaker string           `json:"circuitBreaker"`
-		CapacityAdapter json.RawMessage  `json:"capacityAdapter"`
-		RTKFilters      json.RawMessage  `json:"rtkFilters"`
+			CircuitBreaker  string            `json:"circuitBreaker"`
+		CapacityAdapter json.RawMessage   `json:"capacityAdapter"`
+		RTKFilters      json.RawMessage   `json:"rtkFilters"`
+		HeadroomTokens  int               `json:"headroomTokens"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, `{"error":"decode"}`, 400)
@@ -1277,6 +1284,9 @@ func PutSettingsHandler(d *db.DB) http.HandlerFunc {
 		}
 		if len(body.RTKFilters) > 0 {
 			d.Exec("INSERT OR REPLACE INTO settings_kv (key, value) VALUES (?, ?)", "rtk_filters", string(body.RTKFilters))
+		}
+		if body.HeadroomTokens > 0 {
+			d.Exec("INSERT OR REPLACE INTO settings_kv (key, value) VALUES (?, ?)", "headroom_tokens", fmt.Sprintf("%d", body.HeadroomTokens))
 		}
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}
@@ -1749,6 +1759,36 @@ func ToggleMediaConnectionHandler(d *db.DB) http.HandlerFunc {
 		})
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"id":%s,"active":%t}`, id, active)
+	}
+}
+
+// TestMediaConnectionHandler tests a media account by making a minimal API call.
+func TestMediaConnectionHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ProviderID string `json:"provider_id"`
+			Secret     string `json:"secret"`
+			Operation  string `json:"operation"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+			return
+		}
+		if req.ProviderID == "" || req.Secret == "" {
+			http.Error(w, `{"error":"provider_id and secret required"}`, http.StatusBadRequest)
+			return
+		}
+		if req.Operation == "" {
+			req.Operation = "tts"
+		}
+
+		status, err := media.TestExecutor(req.ProviderID, req.Secret, req.Operation)
+		w.Header().Set("Content-Type", "application/json")
+		if err != nil {
+			fmt.Fprintf(w, `{"ok":false,"error":"%v"}`, err)
+		} else {
+			fmt.Fprintf(w, `{"ok":true,"status":%d,"message":"API key is valid"}`, status)
+		}
 	}
 }
 

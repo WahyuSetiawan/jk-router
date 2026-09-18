@@ -32,6 +32,12 @@
       </div>
     </div>
 
+    <!-- Save -->
+    <div class="card" style="margin-bottom:.8rem">
+      <button class="btn" :disabled="saving" @click="saveAll">{{ t('token_saver.save') }}</button>
+      <span class="note" style="margin-left:.5rem">{{ saveMsg }}</span>
+    </div>
+
     <!-- Status -->
     <div class="card" style="margin-bottom:.8rem">
       <h3 style="color:var(--jkr-lav);font-size:.95rem">{{ t('token_saver.status') }}</h3>
@@ -71,6 +77,8 @@ const headroomTokens = ref(2000)
 const testing = ref(false)
 const testResult = ref('')
 const log = ref('')
+const saving = ref(false)
+const saveMsg = ref('')
 
 async function load() {
   try {
@@ -78,22 +86,36 @@ async function load() {
     if (r.settings?.rtkFilters) {
       try { enabled.value = JSON.parse(r.settings.rtkFilters) } catch { /* ignore */ }
     }
+    if (r.settings?.headroomTokens) {
+      try { headroomTokens.value = parseInt(r.settings.headroomTokens) || 2000 } catch { /* ignore */ }
+    }
   } catch { /* use defaults */ }
 }
 
-async function save() {
-  await fetch('/api/dashboard/settings', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rtkFilters: JSON.stringify(enabled.value) }),
-  })
+async function saveAll() {
+  saving.value = true
+  saveMsg.value = ''
+  try {
+    await fetch('/api/dashboard/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        rtkFilters: JSON.stringify(enabled.value),
+        headroomTokens: headroomTokens.value,
+      }),
+    })
+    saveMsg.value = '✓ tersimpan'
+  } catch (e) {
+    saveMsg.value = '✗ gagal'
+  } finally {
+    saving.value = false
+  }
 }
 
 function toggle(id: string) {
   const i = enabled.value.indexOf(id)
   if (i >= 0) enabled.value.splice(i, 1)
   else enabled.value.push(id)
-  save()
 }
 
 const activeFilters = computed(() => enabled.value.filter(id => id !== 'headroom' || headroomTokens.value > 0))

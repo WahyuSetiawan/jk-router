@@ -36,6 +36,7 @@ const dictionaries: Dictionaries = {
     'token_saver.last_test': 'Tes Terakhir',
     'token_saver.test': 'Jalankan Tes',
     'token_saver.log': 'Log',
+    'token_saver.save': 'Simpan',
 
     'nav.token-saver': 'Token Saver',
   'combos.delete': 'Hapus Combo',
@@ -115,6 +116,10 @@ const dictionaries: Dictionaries = {
     'media.active': 'Aktif',
     'media.inactive': 'Nonaktif',
     'media.none': 'Belum ada koneksi media.',
+    'media.test_connection': '🧪 Uji Koneksi',
+    'media.testing': 'Menguji…',
+    'media.test_ok': 'Koneksi berhasil!',
+    'media.test_err': 'Koneksi gagal',
     // Settings
     'settings.title': 'Pengaturan',
     'settings.capacity_adapter': 'Capacity Adapter',
@@ -189,6 +194,7 @@ const dictionaries: Dictionaries = {
     'token_saver.last_test': 'Last Test',
     'token_saver.test': 'Run Test',
     'token_saver.log': 'Log',
+    'token_saver.save': 'Save',
 
     'nav.combos': 'Combos',
     'nav.endpoint': 'Endpoint',
@@ -272,6 +278,10 @@ const dictionaries: Dictionaries = {
     'media.active': 'Active',
     'media.inactive': 'Inactive',
     'media.none': 'No media connections yet.',
+    'media.test_connection': '🧪 Test Connection',
+    'media.testing': 'Testing…',
+    'media.test_ok': 'Connection successful!',
+    'media.test_err': 'Connection failed',
     'settings.title': 'Settings',
     'settings.capacity_adapter': 'Capacity Adapter',
     'settings.backup': 'Backup & Restore',
