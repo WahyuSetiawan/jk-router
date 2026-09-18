@@ -382,7 +382,10 @@ func ListConnectionsHandler(d *db.DB) http.HandlerFunc {
 		var out []C
 		for rows.Next() {
 			var c C
-			rows.Scan(&c.ID, &c.ProviderID, &c.Name, &c.AuthType, &c.State, &c.Priority, &c.CreatedAt, &c.ProviderName)
+			err := rows.Scan(&c.ID, &c.ProviderID, &c.Name, &c.AuthType, &c.State, &c.Priority, &c.CreatedAt, &c.ProviderName, &c.Tags)
+			if err != nil {
+				continue
+			}
 			out = append(out, c)
 		}
 		if out == nil {
