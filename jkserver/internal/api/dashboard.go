@@ -1401,7 +1401,7 @@ func AuthStatusHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		var hash string
 		err := d.QueryRow("SELECT value FROM settings_kv WHERE key='dashboard_password_hash'").Scan(&hash)
-		firstRun := err == nil
+		firstRun := err != nil
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"first_run": firstRun,
 			"has_password": !firstRun,

@@ -24,7 +24,7 @@ func RequireAuth(d *db.DB) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Skip auth for status + login-related endpoints.
 			path := r.URL.Path
-			if strings.HasPrefix(path, "/auth/") || path == "/health" {
+			if strings.HasPrefix(path, "/auth/") || strings.HasPrefix(path, "/api/dashboard/auth/") || path == "/health" {
 				next.ServeHTTP(w, r)
 				return
 			}
