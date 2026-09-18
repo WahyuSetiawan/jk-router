@@ -55,6 +55,7 @@ func DashboardRouter(d *db.DB, transReg *translator.Registry, refreshFn func()) 
 	r.Get("/providers", ListProvidersHandler(d))
 	r.Post("/providers", CreateProviderHandler(d))
 	r.Get("/providers/{id}", GetProviderHandler(d))
+	r.Get("/providers/{id}/models", GetProviderModelsHandler(d))
 	r.Put("/providers/{id}", UpdateProviderHandler(d))
 	r.Delete("/providers/{id}", DeleteProviderHandler(d))
 
@@ -116,8 +117,41 @@ func DashboardRouter(d *db.DB, transReg *translator.Registry, refreshFn func()) 
 
 	// CLI tools
 	r.Get("/cli-tools", ListCLIToolsHandler(d))
+	r.Get("/models", ListModelsHandler())
 
 	return r
+}
+
+// --- Models catalog (read-only, from registry) ---
+
+// ListModelsHandler returns models grouped by provider.
+func ListModelsHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		regs := registry.GetRegistries()
+		type ProviderModel struct {
+			ProviderID   string   `json:"provider_id"`
+			ProviderName string   `json:"provider_name"`
+			ModelID      string   `json:"model_id"`
+			Name         string   `json:"name,omitempty"`
+			Capabilities []string `json:"capabilities,omitempty"`
+		}
+		var out []ProviderModel
+		for _, reg := range regs {
+			for _, m := range reg.Models {
+				out = append(out, ProviderModel{
+					ProviderID:   reg.ID,
+					ProviderName: reg.Name,
+					ModelID:      m.ID,
+					Name:         m.Name,
+					Capabilities: m.Capabilities,
+				})
+			}
+		}
+		if out == nil {
+			out = []ProviderModel{}
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"models": out})
+	}
 }
 
 // --- Providers (wraps accounts grouped by provider) ---
@@ -266,6 +300,20 @@ func GetProviderHandler(d *db.DB) http.HandlerFunc {
 			row.Accounts = append(row.Accounts, a)
 		}
 		json.NewEncoder(w).Encode(row)
+	}
+}
+
+// GetProviderModelsHandler returns models for a provider from the registry.
+func GetProviderModelsHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		reg := registry.FindByID(id)
+		if reg == nil {
+			http.Error(w, `{"error":"provider not found"}`, 404)
+			return
+		}
+		models := reg.ListModels()
+		json.NewEncoder(w).Encode(map[string]interface{}{"models": models})
 	}
 }
 

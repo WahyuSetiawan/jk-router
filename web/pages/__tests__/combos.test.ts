@@ -4,9 +4,13 @@ import Combos from '../combos.vue'
 import { setLocale } from '~/composables/useI18n'
 
 const MOCK_COMBOS = { combos: [
-  { id: 1, name: 'gpt-default', model_ids: 'gpt-4o,gpt-3.5-turbo', strategy: 'fallback' },
+  { id: 1, name: 'gpt-default', model_ids: '["gpt-4o","gpt-3.5-turbo"]', strategy: 'fallback' },
 ]}
 const MOCK_PROVIDERS = { providers: [{ id: 'openai', name: 'OpenAI', caps: ['chat'] }] }
+const MOCK_MODELS = { models: [
+  { provider_id: 'openai', provider_name: 'OpenAI', model_id: 'gpt-4o', name: 'GPT-4o', capabilities: ['vision'] },
+  { provider_id: 'openai', provider_name: 'OpenAI', model_id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', capabilities: [] },
+]}
 
 function okJson(data: any) {
   return { ok: true, json: () => Promise.resolve(data) }
@@ -39,7 +43,7 @@ async function dataReady(w: any) {
 
 describe('Combos — smoke', () => {
   it('merender halaman dengan judul route', async () => {
-    const fetchFn = makeFetcher([okJson(MOCK_COMBOS), okJson(MOCK_PROVIDERS)])
+    const fetchFn = makeFetcher([okJson(MOCK_COMBOS), okJson(MOCK_PROVIDERS), okJson(MOCK_MODELS)])
     setFetch(fetchFn)
     const w = shallowMount(Combos)
     await dataReady(w)
@@ -47,7 +51,7 @@ describe('Combos — smoke', () => {
   })
 
   it('menampilkan daftar combo dari API', async () => {
-    const fetchFn = makeFetcher([okJson(MOCK_COMBOS), okJson(MOCK_PROVIDERS)])
+    const fetchFn = makeFetcher([okJson(MOCK_COMBOS), okJson(MOCK_PROVIDERS), okJson(MOCK_MODELS)])
     setFetch(fetchFn)
     const w = shallowMount(Combos)
     await dataReady(w)
@@ -56,7 +60,7 @@ describe('Combos — smoke', () => {
   })
 
   it('menampilkan pesan kosong saat tidak ada combo', async () => {
-    const fetchFn = makeFetcher([okJson({ combos: [] }), okJson(MOCK_PROVIDERS)])
+    const fetchFn = makeFetcher([okJson({ combos: [] }), okJson(MOCK_PROVIDERS), okJson(MOCK_MODELS)])
     setFetch(fetchFn)
     const w = shallowMount(Combos)
     await vi.waitFor(

@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { useI18n } from '~/composables/useI18n'
 const { t } = useI18n()
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 
 const combos = ref<any[]>([])
 const providers = ref<any[]>([])
+const models = ref<{provider_id: string; provider_name: string; model_id: string; name?: string; capabilities?: string[]}[]>([])
 const showAdd = ref(false)
-const form = ref({ name: '', description: '', model_ids: '', strategy: 'fallback' })
+const form = ref({ name: '', description: '', model_ids: [] as string[], strategy: 'fallback' })
 const search = ref('')
 const refreshStatus = ref<string>('')
 
@@ -15,16 +16,18 @@ const capabilities = ref<string[]>([])
 const showCaps = ref(false)
 
 async function load() {
-  const [c, p] = await Promise.all([
+  const [c, p, m] = await Promise.all([
     fetch('/api/dashboard/combos').then(r => r.json()),
     fetch('/api/dashboard/providers').then(r => r.json()),
+    fetch('/api/dashboard/models').then(r => r.json()),
   ])
   combos.value = c.combos || []
   providers.value = p.providers || []
+  models.value = m.models || []
 }
 
 function openAdd() {
-  form.value = { name: '', description: '', model_ids: '', strategy: 'fallback' }
+  form.value = { name: '', description: '', model_ids: [], strategy: 'fallback' }
   showAdd.value = true
 }
 
@@ -39,7 +42,7 @@ async function create() {
       strategy: form.value.strategy,
     })
   })
-  form.value = { name: '', description: '', model_ids: '', strategy: 'fallback' }
+  form.value = { name: '', description: '', model_ids: [], strategy: 'fallback' }
   showAdd.value = false
   await load()
 }
@@ -75,17 +78,22 @@ function getProviderName(pid: string): string {
   return found ? found.name : pid
 }
 
-function getAccountForModel(combo: any, model: string): any {
-  // Search through all providers' accounts to find which one handles this model
-  for (const p of providers.value) {
-    for (const a of p.accounts || []) {
-      // Check if this account's provider supports the model
-      if (combo.model_ids?.includes(model) || getModelList(combo.model_ids).includes(model)) {
-        return { provider: p.name, account: a.label }
-      }
-    }
+const modelGroups = computed(() => {
+  const groups: Record<string, typeof models.value> = {}
+  for (const m of models.value) {
+    if (!groups[m.provider_id]) groups[m.provider_id] = []
+    groups[m.provider_id].push(m)
   }
-  return null
+  return groups
+})
+
+function toggleModel(modelId: string) {
+  const idx = form.value.model_ids.indexOf(modelId)
+  if (idx >= 0) {
+    form.value.model_ids.splice(idx, 1)
+  } else {
+    form.value.model_ids.push(modelId)
+  }
 }
 
 function stateClass(s: string) {
@@ -150,13 +158,27 @@ onMounted(load)
 
     <!-- Add Combo Modal -->
     <div v-if="showAdd" class="modal-overlay" @click.self="showAdd=false">
-      <div class="modal">
+      <div class="modal" style="max-width:480px">
         <h3>{{ t('combos.add') }}</h3>
         <div class="kv" style="margin-bottom:.8rem">
           <dt>Nama Combo</dt><dd><input v-model="form.name" class="input" placeholder="e.g. gpt+claude-fallback" /></dd>
           <dt>Deskripsi</dt><dd><input v-model="form.description" class="input" placeholder="e.g. GPT-4o → Claude Sonnet fallback" /></dd>
-          <dt>Model List (JSON array)</dt><dd>
-            <input v-model="form.model_ids" class="input" placeholder='["gpt-4o","claude-sonnet-4"]' />
+          <dt>Pilih Model</dt><dd>
+            <div style="max-height:200px;overflow-y:auto;border:1px solid var(--jkr-surface2);border-radius:6px;padding:.4rem">
+              <div v-for="(group, pid) in modelGroups" :key="pid" style="margin-bottom:.4rem">
+                <div class="note" style="font-size:.7rem;color:var(--jkr-lav);margin-bottom:.2rem">{{ pid }}</div>
+                <div style="display:flex;flex-direction:column;gap:.15rem">
+                  <label v-for="m in group" :key="m.model_id" style="display:flex;align-items:center;gap:.4rem;font-size:.8rem;cursor:pointer">
+                    <input type="checkbox" :value="m.model_id" :checked="form.model_ids.includes(m.model_id)" @change="toggleModel(m.model_id)" />
+                    <span>{{ m.model_id }}</span>
+                    <span v-if="m.name" class="note" style="font-size:.7rem">{{ m.name }}</span>
+                    <span v-for="cap in (m.capabilities || [])" :key="cap" class="chip" style="font-size:.6rem;padding:.1rem .2rem">{{ cap }}</span>
+                  </label>
+                </div>
+              </div>
+              <div v-if="Object.keys(modelGroups).length===0" class="note" style="font-size:.8rem">Belum ada model — klik "Refresh Models"</div>
+            </div>
+            <div class="note" style="font-size:.7rem;margin-top:.2rem">Terpilih: {{ form.model_ids.length }}</div>
           </dd>
           <dt>Strategy</dt><dd>
             <select v-model="form.strategy" class="select">
@@ -167,7 +189,7 @@ onMounted(load)
           </dd>
         </div>
         <div style="display:flex;gap:.5rem">
-          <button class="btn" @click="create">{{ t('providers.save') }}</button>
+          <button class="btn" @click="create" :disabled="form.model_ids.length===0">{{ t('providers.save') }}</button>
           <button class="btn ghost" @click="showAdd=false">{{ t('providers.cancel') }}</button>
         </div>
       </div>
