@@ -175,6 +175,13 @@ func ListProvidersHandler(d *db.DB) http.HandlerFunc {
 			}
 			if p, ok := providers[providerID]; ok {
 				p.Accounts = append(p.Accounts, a)
+			} else {
+				// Orphan account: provider row missing — show a placeholder so the
+				// account is still visible nested under its provider_id.
+				p := &Provider{ID: providerID, Name: providerID}
+				p.Accounts = append(p.Accounts, a)
+				providers[providerID] = p
+				provList = append(provList, providerID)
 			}
 		}
 
@@ -206,19 +213,10 @@ func CreateProviderHandler(d *db.DB) http.HandlerFunc {
 			http.Error(w, `{"error":"name required"}`, 400)
 			return
 		}
-		label := req.Label
-		if label == "" {
-			label = req.Name
-		}
-		authType := req.AuthType
-		if authType == "" {
-			authType = "api_key"
-		}
 
 		var providerID string
-		var accountID int64
 		d.EnqueueWriteSync(func(q *db.Queue) {
-			// Create provider
+			// Create provider only — accounts are added via "+ Akun" per provider.
 			_, err := q.DB().Exec(
 				`INSERT INTO providers (id, name) VALUES (?, ?)`,
 				req.Name, req.Name,
@@ -228,30 +226,10 @@ func CreateProviderHandler(d *db.DB) http.HandlerFunc {
 				return
 			}
 			providerID = req.Name
-
-			// Create account
-			var encrypted sql.NullString
-			if req.BaseURL != "" {
-				enc, err2 := db.EncryptSecret(req.BaseURL)
-				if err2 != nil {
-					http.Error(w, `{"error":"encrypt"}`, 500)
-					return
-				}
-				encrypted = sql.NullString{String: enc, Valid: true}
-			}
-			res2, err := q.DB().Exec(
-				`INSERT INTO accounts (provider_id, label, auth_type, encrypted_key, state) VALUES (?, ?, ?, ?, 'active')`,
-				providerID, label, authType, encrypted,
-			)
-			if err != nil {
-				http.Error(w, fmt.Sprintf(`{"error":"create account: %v"}`, err), 500)
-				return
-			}
-			accountID, _ = res2.LastInsertId()
 		})
 
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"id":"%s","account_id":%d,"name":"%s"}`, providerID, accountID, req.Name)
+		fmt.Fprintf(w, `{"id":"%s","name":"%s"}`, providerID, req.Name)
 	}
 }
 
@@ -435,6 +413,11 @@ func CreateConnectionHandler(d *db.DB) http.HandlerFunc {
 
 		var id int64
 		d.EnqueueWriteSync(func(q *db.Queue) {
+			// Auto-register provider so the account always nests under it on the providers page.
+			if _, e := q.DB().Exec(`INSERT OR IGNORE INTO providers (id, name) VALUES (?, ?)`, req.ProviderID, req.ProviderID); e != nil {
+				http.Error(w, fmt.Sprintf(`{"error":"insert: %v"}`, e), 500)
+				return
+			}
 			res, e := q.DB().Exec(
 				`INSERT INTO accounts (provider_id, label, auth_type, encrypted_key, priority, proxy_pool_id, state, tags) VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`,
 				req.ProviderID, req.Label, authType, encrypted, priority, req.ProxyPoolID, req.Tags,

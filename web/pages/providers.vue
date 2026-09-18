@@ -72,7 +72,7 @@ async function saveEdit(a: any) {
   const f = editForm.value[a.id]
   await fetch(`/api/dashboard/connections/${a.id}`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: f.label, proxy_pool_id: f.proxy_pool_id || null })
+    body: JSON.stringify({ label: f.label, proxy_pool_id: f.proxy_pool_id || null })
   })
   editingAccount.value = null
   await load()
