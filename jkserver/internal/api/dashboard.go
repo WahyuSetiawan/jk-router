@@ -369,15 +369,15 @@ func ListConnectionsHandler(d *db.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 		type C struct {
-			ID           int64  `json:"id"`
-			ProviderID   string `json:"provider_id"`
-			ProviderName string `json:"provider_name"`
-			Name         string `json:"name"`
-			AuthType     string `json:"auth_type"`
-			State        string `json:"state"`
-			Priority     int    `json:"priority"`
-			CreatedAt    int64  `json:"created_at"`
-			Tags         string `json:"tags"`
+			ID           int64        `json:"id"`
+			ProviderID   string       `json:"provider_id"`
+			ProviderName sql.NullString `json:"provider_name"`
+			Name         string       `json:"name"`
+			AuthType     string       `json:"auth_type"`
+			State        string       `json:"state"`
+			Priority     int          `json:"priority"`
+			CreatedAt    int64        `json:"created_at"`
+			Tags         string       `json:"tags"`
 		}
 		var out []C
 		for rows.Next() {
@@ -444,6 +444,10 @@ func CreateConnectionHandler(d *db.DB) http.HandlerFunc {
 				return
 			}
 			id, _ = res.LastInsertId()
+			// Force checkpoint to make write visible to subsequent reads
+			// ponytail: this is a workaround for modernc/sqlite WAL visibility bug
+			// upgrade path: file issue on modernc/sqlite repo
+			q.DB().Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
 		})
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"id":%d}`, id)
