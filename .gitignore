@@ -72,3 +72,8 @@ jkserver/internal/db/test.db
 jkserver/cmd/_nuxt/
 
 .ua/
+
+# understand-anything auto-update scratch (trash)
+.ua/.trash-*
+
+# local git hooks are not tracked; post-commit lives in .git/hooks/
