@@ -229,7 +229,7 @@ func TestConnectionsCRUD(t *testing.T) {
 	// Create connection
 	createBody, _ := json.Marshal(map[string]string{
 		"provider_id": "openai",
-		"name":        "test-conn",
+		"label":       "test-conn",
 		"auth_type":   "api_key",
 	})
 	createReq := httptest.NewRequest("POST", srv.URL+"/api/dashboard/connections", bytes.NewReader(createBody))

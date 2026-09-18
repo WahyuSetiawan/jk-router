@@ -397,7 +397,7 @@ func CreateConnectionHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			ProviderID  string `json:"provider_id"`
-			Name        string `json:"name"`
+			Label       string `json:"label"`
 			Secret      string `json:"secret"`
 			AuthType    string `json:"auth_type"`
 			Priority    int    `json:"priority"`
@@ -405,8 +405,8 @@ func CreateConnectionHandler(d *db.DB) http.HandlerFunc {
 			Tags        string `json:"tags"`
 		}
 		json.NewDecoder(r.Body).Decode(&req)
-		if req.ProviderID == "" || req.Name == "" {
-			http.Error(w, `{"error":"provider_id and name required"}`, 400)
+		if req.ProviderID == "" || req.Label == "" {
+			http.Error(w, `{"error":"provider_id and label required"}`, 400)
 			return
 		}
 		authType := req.AuthType
@@ -434,7 +434,7 @@ func CreateConnectionHandler(d *db.DB) http.HandlerFunc {
 		d.EnqueueWriteSync(func(q *db.Queue) {
 			res, e := q.DB().Exec(
 				`INSERT INTO accounts (provider_id, label, auth_type, encrypted_key, priority, proxy_pool_id, state, tags) VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`,
-				req.ProviderID, req.Name, authType, encrypted, priority, req.ProxyPoolID, req.Tags,
+				req.ProviderID, req.Label, authType, encrypted, priority, req.ProxyPoolID, req.Tags,
 			)
 			if e != nil {
 				http.Error(w, fmt.Sprintf(`{"error":"insert: %v"}`, e), 500)
@@ -472,7 +472,7 @@ func UpdateConnectionHandler(d *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		var req struct {
-			Name        string `json:"name"`
+			Label       string `json:"label"`
 			ProxyPoolID *int64 `json:"proxy_pool_id"`
 			Tags        string `json:"tags"`
 		}
@@ -483,9 +483,9 @@ func UpdateConnectionHandler(d *db.DB) http.HandlerFunc {
 		d.EnqueueWriteSync(func(q *db.Queue) {
 			setParts := []string{}
 			args := []interface{}{}
-			if req.Name != "" {
+			if req.Label != "" {
 				setParts = append(setParts, "label=?")
-				args = append(args, req.Name)
+				args = append(args, req.Label)
 			}
 			if req.ProxyPoolID != nil {
 				setParts = append(setParts, "proxy_pool_id=?")
