@@ -70,3 +70,5 @@ scratch/
 jkserver/internal/db/test.db
 # Nuxt build metadata (regenerates on each build)
 jkserver/cmd/_nuxt/
+
+.ua/
