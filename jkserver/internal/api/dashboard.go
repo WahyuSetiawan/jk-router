@@ -24,6 +24,7 @@ import (
 
 	"jkrouter/jkserver/internal/db"
 	"jkrouter/jkserver/internal/media"
+	"jkrouter/jkserver/internal/providers/registry"
 	"jkrouter/jkserver/internal/rtk"
 	"jkrouter/jkserver/internal/settings"
 	"jkrouter/jkserver/internal/translator"
@@ -62,6 +63,7 @@ func DashboardRouter(d *db.DB, transReg *translator.Registry, refreshFn func()) 
 	r.Put("/connections/{id}", UpdateConnectionHandler(d))
 	r.Delete("/connections/{id}", DeleteConnectionHandler(d))
 	r.Patch("/connections/{id}/toggle", ToggleConnectionHandler(d))
+	r.Post("/connections/{id}/test", TestConnectionHandler(d))
 	r.Get("/connections/{id}/quota", GetQuotaHandler(d))
 	r.Put("/connections/{id}/quota", UpdateQuotaHandler(d))
 
@@ -465,6 +467,7 @@ func UpdateConnectionHandler(d *db.DB) http.HandlerFunc {
 			Label       string `json:"label"`
 			ProxyPoolID *int64 `json:"proxy_pool_id"`
 			Tags        string `json:"tags"`
+			Secret      string `json:"secret"` // API key baru (opsional; kosong = tidak diubah)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"error":"decode"}`, 400)
@@ -485,6 +488,15 @@ func UpdateConnectionHandler(d *db.DB) http.HandlerFunc {
 				setParts = append(setParts, "tags=?")
 				args = append(args, req.Tags)
 			}
+			if req.Secret != "" {
+				enc, e := db.EncryptSecret(req.Secret)
+				if e != nil {
+					http.Error(w, `{"error":"encrypt"}`, 500)
+					return
+				}
+				setParts = append(setParts, "encrypted_key=?")
+				args = append(args, sql.NullString{String: enc, Valid: true})
+			}
 			if len(setParts) > 0 {
 				args = append(args, id)
 				q.DB().Exec(fmt.Sprintf("UPDATE accounts SET %s WHERE id=?", joinStrings(setParts, ",")), args...)
@@ -492,6 +504,58 @@ func UpdateConnectionHandler(d *db.DB) http.HandlerFunc {
 		})
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+	}
+}
+
+// TestConnectionHandler tests an account's stored API key by calling the
+// provider's /models endpoint with the correct auth header for that provider.
+func TestConnectionHandler(d *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		var providerID string
+		var enc sql.NullString
+		err := d.QueryRow(`SELECT provider_id, encrypted_key FROM accounts WHERE id=?`, id).Scan(&providerID, &enc)
+		if err != nil {
+			http.Error(w, `{"error":"not found"}`, 404)
+			return
+		}
+		if !enc.Valid || enc.String == "" {
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "no key stored"})
+			return
+		}
+		plain, err := db.DecryptSecret(enc.String)
+		if err != nil {
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "decrypt failed"})
+			return
+		}
+		reg := registry.FindByID(providerID)
+		if reg == nil || reg.ValidateURL == "" {
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "no validate url for provider " + providerID})
+			return
+		}
+		client := reg.ClientFn(plain)
+		req2, _ := http.NewRequest("GET", reg.ValidateURL, nil)
+		if reg.AuthPrefix != "" {
+			req2.Header.Set(reg.AuthHeader, reg.AuthPrefix+" "+plain)
+		} else {
+			req2.Header.Set(reg.AuthHeader, plain)
+		}
+		for k, v := range reg.Headers {
+			req2.Header.Set(k, v)
+		}
+		resp, err := client.Do(req2)
+		if err != nil {
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+		ok := resp.StatusCode == http.StatusOK
+		msg := ""
+		if !ok {
+			msg = fmt.Sprintf("upstream status %d", resp.StatusCode)
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": ok, "status": resp.StatusCode, "error": msg})
 	}
 }
 

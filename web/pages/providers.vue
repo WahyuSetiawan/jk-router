@@ -20,6 +20,8 @@ const accountForm = ref({
 })
 const editingAccount = ref<number | null>(null)
 const editForm = ref<Record<number, any>>({})
+const testing = ref<Record<number, boolean>>({})
+const testResult = ref<Record<number, any>>({})
 
 async function load() {
   const [pr, pp] = await Promise.all([
@@ -70,12 +72,27 @@ function startEdit(a: any) {
 
 async function saveEdit(a: any) {
   const f = editForm.value[a.id]
+  const body: any = { label: f.label, proxy_pool_id: f.proxy_pool_id || null }
+  if (f._newSecret) body.secret = f._newSecret
   await fetch(`/api/dashboard/connections/${a.id}`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label: f.label, proxy_pool_id: f.proxy_pool_id || null })
+    body: JSON.stringify(body)
   })
   editingAccount.value = null
   await load()
+}
+
+async function testAccount(a: any) {
+  testing.value[a.id] = true
+  testResult.value[a.id] = null
+  try {
+    const r = await fetch(`/api/dashboard/connections/${a.id}/test`, { method: 'POST' })
+    testResult.value[a.id] = await r.json()
+  } catch (e: any) {
+    testResult.value[a.id] = { ok: false, error: e.message }
+  } finally {
+    testing.value[a.id] = false
+  }
 }
 
 function cancelEdit() { editingAccount.value = null }
@@ -234,8 +251,10 @@ onMounted(load)
               <th>Name</th>
               <th>Type</th>
               <th>Proxy Pool</th>
+              <th>Access Key</th>
               <th>Priority</th>
               <th>State</th>
+              <th>Test</th>
               <th></th>
             </tr>
           </thead>
@@ -283,6 +302,16 @@ onMounted(load)
                 </template>
               </td>
 
+              <!-- Access Key -->
+              <td>
+                <template v-if="editingAccount === a.id">
+                  <input v-model="editForm[a.id]._newSecret" class="input" style="width:140px" :placeholder="a.auth_type==='oauth' ? 'token baru' : 'sk-... (kosong = tetap)'" />
+                </template>
+                <template v-else>
+                  <span class="note" style="font-size:.65rem">••••••••</span>
+                </template>
+              </td>
+
               <!-- Priority -->
               <td>{{ a.priority ?? '—' }}</td>
 
@@ -291,6 +320,19 @@ onMounted(load)
                 <span v-if="editingAccount !== a.id" :class="stateClass(a.state)" style="cursor:pointer" @click="toggleState(a)">
                   {{ stateLabel(a.state) }}
                 </span>
+              </td>
+
+              <!-- Test -->
+              <td>
+                <template v-if="editingAccount !== a.id">
+                  <button class="btn ghost" style="padding:.15rem .3rem;font-size:.7rem" :disabled="testing[a.id]" @click="testAccount(a)">
+                    {{ testing[a.id] ? '…' : '🧪' }}
+                  </button>
+                  <span v-if="testResult[a.id]" class="chip" :style="{fontSize:'.65rem', background: testResult[a.id].ok ? '#3d7a4a' : '#b45151'}">
+                    {{ testResult[a.id].ok ? 'valid' : 'invalid' }}
+                  </span>
+                  <div v-if="testResult[a.id] && !testResult[a.id].ok && testResult[a.id].error" class="note" style="font-size:.6rem">{{ testResult[a.id].error }}</div>
+                </template>
               </td>
 
               <!-- Actions -->
@@ -306,7 +348,7 @@ onMounted(load)
               </td>
             </tr>
             <tr v-if="!p.accounts?.length">
-              <td colspan="7" class="note" style="text-align:center;padding:.5rem">
+              <td colspan="9" class="note" style="text-align:center;padding:.5rem">
                 Belum ada akun — klik "+ Akun"
               </td>
             </tr>
