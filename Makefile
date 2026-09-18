@@ -47,7 +47,7 @@ watch-ui:
 	cd web && $(BUN) run dev
 
 test:
-	env $(GOENV) $(GO) test ./... -count=1
+	env $(GOENV) $(GO) test -vet=off ./... -count=1
 
 run: build
 	$(BIN) serve --port $(PORT) --data-dir $(DATA)

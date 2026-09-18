@@ -94,7 +94,7 @@ func ExportConfig(dataDir string) {
 		"proxy_pools": &exp.ProxyPools,
 	}
 	for table, dest := range tables {
-		rows, err := d.Query("SELECT * FROM " + table + " LIMIT 0")
+		rows, err := d.Query("SELECT * FROM " + table)
 		if err != nil {
 			continue
 		}

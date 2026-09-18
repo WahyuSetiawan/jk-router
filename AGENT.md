@@ -35,6 +35,8 @@ JKRouter/
 │   ├── plugins/
 │   └── nuxt.config.ts
 ├── docs/              # PRD, TASKS, sprint docs
+│   ├── guidelines/    # Testing guidelines & konvensi
+│   └── issues/        # Audit report & tracking masalah
 ├── Makefile           # semua command di sini
 └── go.mod / web/package.json
 ```
@@ -98,27 +100,50 @@ npx ...
 - Chart pakai Chart.js (bukan recharts).
 - Build output → `web/.output/public/` lalu di-copy ke `jkserver/cmd/`.
 
+## Testing — WAJIB
+
+Guidelines lengkap: **`docs/guidelines/testing.md`**.
+Laporan gap audit (status test per fitur PRD): **`docs/issues/audit-testing-2026-09-18.md`**.
+
+Ringkasan aturan:
+
+- **Setiap feature baru wajib dibawa bareng testnya.** Go → `*_test.go` table-driven sebelah kode. Web → `*.test.ts` (Vitest, smoke render + 1 behavior test untuk interaksi).
+- **Bug fix wajib regression test** yang gagal sebelum fix, hijau setelah fix.
+- **Test hijau = syarat commit**: `make test` (Go) dan `bun test` di `web/` (kalau sentuh UI/composable).
+- Go: stdlib `testing` + `httptest` + `t.TempDir()` saja, table-driven. Ikuti pola `internal/db/db_test.go`.
+- Web: hanya Vitest + `@vue/test-utils` yang diizinkan. No Playwright/e2e browser (belum diperlukan).
+- Jangan commit test yang di-skip tanpa alasan.
+
+### Prioritas Gap Test (lihat audit lengkap di `docs/issues/audit-testing-2026-09-18.md`)
+
+| Prioritas | Area | Status | Tindakan |
+|---|---|---|---|
+| 🔴 Critical | Auth + RequireAuth middleware | ❌ 0 test | Buat `jkserver/internal/api/auth_test.go` |
+| 🔴 Critical | Backup & restore DB | ❌ 0 test | Buat `jkserver/internal/db/backup_test.go` |
+| 🔴 Critical | Export/import config JSON | ❌ 0 test | Buat `jkserver/cmd/subcommands_test.go` |
+| 🟡 Important | MCP server | ❌ 0 test | Buat `jkserver/internal/mcp/server_test.go` |
+| 🟡 Important | Media endpoints (TTS/STT/image) | ❌ 0 test | Buat `jkserver/internal/media/routes_test.go` |
+| 🟡 Important | Executors | ❌ 0 test | Buat `jkserver/internal/executors/executor_test.go` |
+| 🟢 Low | Dashboard CRUD (POST/PUT/DELETE) | ⚠️ 1 suite (GET+POST only) | Tambah endpoint CRUD di `dashboard_test.go` |
+| 🟢 Low | Web/Nuxt frontend | ❌ 0 test (Vitest belum setup) | Install Vitest → buat smoke test per halaman P1
+
 ## Workflow Kerja
 
 1. Baca `docs/PRD.md` untuk spesifikasi perilaku.
-2. Cek `docs/TASKS.md` untuk status sprint (Sprint 1-5 selesai, Sprint 6 masih jalan).
-3. Cek `docs/REMAINING_TASKS.md` untuk yang tersisa.
-4. Sebelum edit, **grep semua caller** fungsi yang mau diubah (root-cause fix, bukan symptom).
-5. Commit setelah test hijau (`make test`).
+2. Cek `docs/TASKS.md` untuk status sprint (Sprint 1–6 selesai).
+3. Cek `docs/issues/audit-testing-2026-09-18.md` untuk gap testing yang perlu ditutup.
+4. Cek `docs/plan/penutupan-gap-testing.md` untuk rencana eksekusi penutupan gap.
+5. Sebelum edit, **grep semua caller** fungsi yang mau diubah (root-cause fix, bukan symptom).
+6. Tulis/ubah kode **bersama testnya** (lihat `docs/guidelines/testing.md`).
+7. Commit setelah test hijau (`make test`, dan `bun test` di `web/` bila sentuh UI).
 
 ## Sprint Saat Ini
 
 | Sprint | Status |
 |--------|--------|
-| 1–5 | ✅ Selesai |
-| 5.1, 5.6 | ✅ Selesai |
-| 6 | 🔄 Dalam progress |
+| 1–6 | ✅ Selesai (2026-09-17) |
 
-**Gap tersisa** (lihat `docs/REMAINING_TASKS.md`):
-- `token-saver.vue` page belum ada (RTK UI dedicated)
-- Binary ~18MB (target <15MB)
-- RTK filters belum di-wire ke engine routing
-- Settings RTK toggle masih stub/disabled
+**Gap testing yang perlu ditutup**: lihat `docs/plan/penutupan-gap-testing.md` (12 tasks, ~3 jam, 4 phase). Prioritas: auth test → backup/restore → export/import → SSE integration → MCP/media → Vitest setup.
 
 ## Deviations / Known Issues
 
